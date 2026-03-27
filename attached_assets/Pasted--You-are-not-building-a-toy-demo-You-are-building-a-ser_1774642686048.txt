@@ -1,0 +1,141 @@
+}
+You are not building a toy demo. You are building a serious personal AI coding workspace for local development, inspired by the workflow quality of Replit and Manus.
+
+I want a production-minded MVP for personal use only.
+
+Core goal:
+Build a local-first AI coding assistant application that lets me give a single task in natural language and have the system execute it end-to-end on medium-sized software projects, especially frontend and backend work.
+
+The final product can be either:
+- a desktop app, or
+- a browser-based local web app
+
+Choose the architecture that gives the strongest real-world execution quality, best reliability, and easiest local operation on Windows.
+
+Do not ask me for permissions during runtime inside the product workflow. The assistant should operate in an execution-oriented mode, not a constant approval/chat mode.
+
+The AI model provider will be z.ai via API key.
+Design the integration so that the model layer is replaceable, but z.ai is the default provider.
+
+Non-negotiable product requirements:
+1. The assistant must work on real local project folders on my computer.
+2. It must handle medium-sized frontend and backend tasks.
+3. It must support multi-file reading, editing, creation, and deletion.
+4. It must support terminal/command execution.
+5. It must support iterative task execution:
+   - analyze task
+   - inspect codebase
+   - plan internally
+   - make changes
+   - run commands
+   - detect errors
+   - attempt fixes
+   - produce final result
+6. It must minimize follow-up questions during execution.
+7. It must include strong safety boundaries at the filesystem level so it only works inside the selected workspace/project directory.
+8. It must have a clean, modern interface inspired by Replit-style workflows:
+   - left file explorer
+   - central code editor
+   - bottom terminal/output panel
+   - right AI task/chat/execution panel
+   - top toolbar/status area
+9. It must be designed for local execution on my own machine, not as a cloud SaaS.
+10. It must be actually runnable after generation, not just partially scaffolded.
+
+Preferred stack:
+- Frontend: Next.js or React
+- Editor: Monaco
+- Backend/local agent service: Node.js preferred
+- Real-time communication: WebSocket or equivalent
+- Terminal execution: secure local process execution
+- File operations: local filesystem APIs with strict workspace scoping
+- Model integration: z.ai API abstraction layer
+
+Execution philosophy:
+I want a Replit-like / Manus-like experience for personal use:
+- I type a task
+- the assistant executes it with minimal friction
+- it edits files and runs commands
+- it reports final results clearly
+- it does not constantly stop to ask for approvals
+
+Important design requirement:
+Do not fake autonomy.
+If something cannot truly be executed locally, explicitly say so and build the closest real working implementation instead of pretending.
+
+Your job:
+Build the MVP with real implementation, not mock architecture.
+
+Deliverables required:
+1. Full project code
+2. Clear project structure
+3. Clear setup instructions
+4. Clear run instructions for Windows local development
+5. Environment variable template
+6. z.ai integration points
+7. Filesystem safety rules
+8. Agent execution loop explanation
+9. Known limitations section
+10. Suggested next improvements
+
+Technical requirements in detail:
+- Use a local workspace picker or workspace path configuration
+- Restrict all file operations to the chosen workspace root
+- Provide read/write/edit/create/delete operations
+- Provide command execution in workspace context
+- Stream logs/output live in the UI
+- Show current task status
+- Support task history in a basic way
+- Support diff or change visibility before/after edits if practical
+- Keep the architecture modular:
+  - ui
+  - agent orchestration
+  - model provider adapter
+  - file tools
+  - terminal tools
+  - safety layer
+- Build the code so I can later swap z.ai for another provider if needed
+
+Agent behavior requirements:
+- The system should internally orchestrate task execution
+- It should not depend on me answering multiple questions for ordinary coding tasks
+- It should make reasonable assumptions and proceed
+- It should stop only on truly blocking failures
+- It should summarize what it changed and what remains
+
+UI requirements:
+- Modern dark theme by default
+- Clean developer-tool aesthetic
+- Fast and practical, not marketing-heavy
+- Functional before decorative
+- Replit-inspired layout, but do not waste time trying to clone Replit pixel-for-pixel
+
+Strict output requirements:
+I do not want a shallow response.
+I want you to actually generate the project.
+
+Do not stop at identifying flaws. Think like the person who will be blamed if this ships in its current state.
+
+Before finalizing:
+- verify the architecture is runnable
+- verify there are no fake modules
+- verify imports are coherent
+- verify setup steps are realistic
+- verify the local execution model makes sense
+- verify the z.ai integration is not pseudo-code
+
+If you must simplify something, simplify only the least critical part and explain why.
+
+Final response format:
+1. Brief architecture decision
+2. Project tree
+3. Full implementation
+4. Setup steps
+5. Run steps
+6. Environment configuration
+7. How the agent loop works
+8. What is fully working now
+9. What is partially implemented
+10. What should be improved next
+
+Do not give me only a plan. Build the MVP

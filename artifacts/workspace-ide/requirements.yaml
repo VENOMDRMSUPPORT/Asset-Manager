@@ -1,0 +1,12 @@
+packages:
+  "@monaco-editor/react": "Required for the center code editor panel"
+  "date-fns": "For formatting timestamps in the task history and agent logs"
+  "zustand": "For managing global IDE state (open files, terminal output) without complex context"
+  "framer-motion": "For smooth transitions and layout animations in the UI"
+
+images: []
+
+notes:
+  - "WebSocket server is assumed to be at ws://[host]/ws (or wss for https)"
+  - "The API hooks are imported from @workspace/api-client-react as specified"
+  - "Zustand is used for local IDE state like open editor tabs, while TanStack Query is used for remote data"

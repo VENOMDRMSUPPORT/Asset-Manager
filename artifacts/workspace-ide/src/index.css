@@ -1,0 +1,120 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Deep, professional dark theme palette */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  
+  --color-panel: hsl(var(--panel));
+  --color-panel-foreground: hsl(var(--panel-foreground));
+  --color-panel-border: hsl(var(--panel-border));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+}
+
+:root {
+  /* Force dark mode */
+  --background: 240 10% 4%;     /* #09090b */
+  --foreground: 0 0% 98%;       /* #fafafa */
+  
+  --panel: 240 6% 10%;          /* #18181b */
+  --panel-foreground: 0 0% 98%;
+  --panel-border: 240 6% 16%;   /* #27272a */
+
+  --primary: 252 87% 68%;       /* Soft Purple/Blue for AI */
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 240 6% 16%;
+  --secondary-foreground: 0 0% 98%;
+  
+  --muted: 240 6% 16%;
+  --muted-foreground: 240 5% 65%; /* #a1a1aa */
+  
+  --accent: 252 87% 68%;
+  --accent-foreground: 0 0% 100%;
+  
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+
+  --success: 142 71% 45%;
+  --success-foreground: 0 0% 100%;
+
+  --warning: 38 92% 50%;
+  --warning-foreground: 0 0% 100%;
+  
+  --border: 240 6% 16%;
+  --input: 240 6% 16%;
+  --ring: 252 87% 68%;
+  
+  --radius: 0.5rem;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground antialiased font-sans overflow-hidden;
+    /* Prevent rubber banding on mac */
+    overscroll-behavior: none; 
+  }
+}
+
+@layer utilities {
+  /* Custom scrollbar for a sleek IDE feel */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 5px;
+    border: 2px solid hsl(var(--panel));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+
+  .ide-grid {
+    display: grid;
+    grid-template-columns: 260px 1fr 340px;
+    grid-template-rows: 48px 1fr 280px;
+    grid-template-areas:
+      "header header header"
+      "sidebar editor taskbar"
+      "sidebar terminal taskbar";
+    height: 100vh;
+    width: 100vw;
+  }
+}

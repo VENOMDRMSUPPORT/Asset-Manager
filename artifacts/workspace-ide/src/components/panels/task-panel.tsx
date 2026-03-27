@@ -1,0 +1,135 @@
+import { useState } from 'react';
+import { useStartAgentTask, useListAgentTasks } from '@workspace/api-client-react';
+import { useIdeStore } from '@/store/use-ide-store';
+import { Bot, Sparkles, Send, Clock, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+import { useQueryClient } from '@tanstack/react-query';
+import { getListAgentTasksQueryKey } from '@workspace/api-client-react';
+
+export function TaskPanel() {
+  const [prompt, setPrompt] = useState('');
+  const setActiveTask = useIdeStore(s => s.setActiveTask);
+  const activeTaskId = useIdeStore(s => s.activeTaskId);
+  const queryClient = useQueryClient();
+
+  const { data: historyData, isLoading: isLoadingHistory } = useListAgentTasks();
+  
+  const { mutate: startTask, isPending } = useStartAgentTask({
+    mutation: {
+      onSuccess: (data) => {
+        setPrompt('');
+        setActiveTask(data.taskId);
+        queryClient.invalidateQueries({ queryKey: getListAgentTasksQueryKey() });
+      }
+    }
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim() || isPending || activeTaskId) return;
+    startTask({ data: { prompt: prompt.trim() } });
+  };
+
+  const isRunning = isPending || activeTaskId !== null;
+
+  return (
+    <div className="bg-panel flex flex-col h-full overflow-hidden" style={{ gridArea: 'taskbar' }}>
+      <div className="h-12 border-b border-panel-border flex items-center px-4 shrink-0 bg-background/50">
+        <h2 className="text-sm font-semibold flex items-center gap-2 text-foreground">
+          <Bot className="w-4 h-4 text-primary" />
+          AI Assistant
+        </h2>
+      </div>
+
+      <div className="flex-1 overflow-y-auto flex flex-col">
+        {/* Input Section */}
+        <div className="p-4 border-b border-panel-border bg-background/20">
+          <form onSubmit={handleSubmit} className="relative">
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="What would you like me to build or modify?"
+              className="w-full h-32 bg-background border border-panel-border rounded-xl p-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none transition-all"
+              disabled={isRunning}
+            />
+            <div className="absolute bottom-3 right-3 flex items-center gap-2">
+              <button
+                type="submit"
+                disabled={!prompt.trim() || isRunning}
+                className="p-2 bg-primary text-primary-foreground rounded-lg shadow-lg shadow-primary/20 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all group"
+              >
+                {isRunning ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                )}
+              </button>
+            </div>
+          </form>
+
+          {activeTaskId && (
+            <div className="mt-4 p-3 rounded-lg border border-primary/20 bg-primary/10 flex items-center justify-between animate-in fade-in">
+              <div className="flex items-center gap-2 text-sm text-primary">
+                <Sparkles className="w-4 h-4 animate-pulse" />
+                <span>Agent is working...</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* History Section */}
+        <div className="flex-1 p-4">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5" />
+            Task History
+          </h3>
+          
+          <div className="space-y-2">
+            {isLoadingHistory ? (
+              <div className="flex justify-center p-4">
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : !historyData?.tasks || historyData.tasks.length === 0 ? (
+              <div className="text-sm text-muted-foreground text-center p-4 bg-background/50 rounded-lg border border-dashed border-panel-border">
+                No tasks run yet.
+              </div>
+            ) : (
+              historyData.tasks.map((task) => (
+                <div 
+                  key={task.id} 
+                  className={`p-3 rounded-lg border text-left transition-colors cursor-pointer group
+                    ${activeTaskId === task.id ? 'bg-primary/10 border-primary/30' : 'bg-background hover:bg-panel-border/50 border-panel-border'}`}
+                  onClick={() => setActiveTask(task.id)}
+                >
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <p className="text-sm font-medium text-foreground line-clamp-2 leading-snug">
+                      {task.prompt}
+                    </p>
+                    <StatusIcon status={task.status} />
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}</span>
+                    <span className="capitalize">{task.status}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusIcon({ status }: { status: string }) {
+  switch (status) {
+    case 'running':
+      return <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />;
+    case 'done':
+      return <CheckCircle2 className="w-4 h-4 text-success shrink-0" />;
+    case 'error':
+      return <AlertCircle className="w-4 h-4 text-destructive shrink-0" />;
+    default:
+      return <Clock className="w-4 h-4 text-muted-foreground shrink-0" />;
+  }
+}

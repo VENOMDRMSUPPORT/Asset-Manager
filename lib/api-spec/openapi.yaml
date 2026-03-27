@@ -1,15 +1,20 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Local AI Coding Workspace API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: workspace
+    description: Workspace configuration
+  - name: files
+    description: File system operations
+  - name: agent
+    description: AI agent task execution
 paths:
   /healthz:
     get:
@@ -24,6 +29,211 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /workspace:
+    get:
+      operationId: getWorkspace
+      tags: [workspace]
+      summary: Get workspace config
+      responses:
+        "200":
+          description: Workspace configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceConfig"
+    post:
+      operationId: setWorkspace
+      tags: [workspace]
+      summary: Set workspace root path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetWorkspaceRequest"
+      responses:
+        "200":
+          description: Updated workspace config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceConfig"
+        "400":
+          description: Invalid path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files:
+    get:
+      operationId: listFiles
+      tags: [files]
+      summary: List files in workspace
+      parameters:
+        - name: path
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Relative path within workspace (default is root)
+      responses:
+        "200":
+          description: File tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileListResponse"
+        "400":
+          description: Invalid or unsafe path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files/read:
+    get:
+      operationId: readFile
+      tags: [files]
+      summary: Read file contents
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileContentResponse"
+        "400":
+          description: Invalid or unsafe path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files/write:
+    post:
+      operationId: writeFile
+      tags: [files]
+      summary: Write or create a file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WriteFileRequest"
+      responses:
+        "200":
+          description: File written
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid or unsafe path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /files/delete:
+    delete:
+      operationId: deleteFile
+      tags: [files]
+      summary: Delete a file or directory
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid or unsafe path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /agent/tasks:
+    post:
+      operationId: startAgentTask
+      tags: [agent]
+      summary: Start a new agent task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartTaskRequest"
+      responses:
+        "200":
+          description: Task started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStartResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listAgentTasks
+      tags: [agent]
+      summary: List all agent task history
+      responses:
+        "200":
+          description: Task history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListResponse"
+
+  /agent/tasks/{taskId}:
+    get:
+      operationId: getAgentTask
+      tags: [agent]
+      summary: Get a specific agent task
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTask"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +244,179 @@ components:
       required:
         - status
 
+    WorkspaceConfig:
+      type: object
+      properties:
+        root:
+          type: string
+          description: Absolute path to workspace root
+        isSet:
+          type: boolean
+      required:
+        - root
+        - isSet
+
+    SetWorkspaceRequest:
+      type: object
+      properties:
+        root:
+          type: string
+      required:
+        - root
+
+    FileEntry:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+          description: Relative path from workspace root
+        type:
+          type: string
+          enum: [file, directory]
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileEntry"
+      required:
+        - name
+        - path
+        - type
+
+    FileListResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileEntry"
+        workspaceRoot:
+          type: string
+      required:
+        - entries
+        - workspaceRoot
+
+    FileContentResponse:
+      type: object
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        language:
+          type: string
+          description: Detected language for editor syntax highlighting
+      required:
+        - path
+        - content
+        - language
+
+    WriteFileRequest:
+      type: object
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+      required:
+        - path
+        - content
+
+    StartTaskRequest:
+      type: object
+      properties:
+        prompt:
+          type: string
+          description: Natural language task description
+      required:
+        - prompt
+
+    TaskStartResponse:
+      type: object
+      properties:
+        taskId:
+          type: string
+        status:
+          type: string
+      required:
+        - taskId
+        - status
+
+    AgentTask:
+      type: object
+      properties:
+        id:
+          type: string
+        prompt:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, done, error]
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentEvent"
+        summary:
+          type: string
+      required:
+        - id
+        - prompt
+        - status
+        - createdAt
+        - events
+
+    AgentEvent:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [status, thought, file_read, file_write, command, command_output, error, done]
+        message:
+          type: string
+        data:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - type
+        - message
+        - timestamp
+
+    TaskListResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentTask"
+      required:
+        - tasks
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+        - message
