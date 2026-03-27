@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
+    "test": "tsx ./src/test-safety.ts && tsx ./src/test-model-config.ts",
+    "test:safety": "tsx ./src/test-safety.ts",
+    "test:model": "tsx ./src/test-model-config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

@@ -1,0 +1,152 @@
+You already built the MVP.
+
+Now do a single comprehensive hardening, validation, orchestration-upgrade, and local-readiness pass.
+
+This is not a feature brainstorm. This is an engineering reliability pass to turn the current MVP into a trustworthy personal-use AI coding assistant.
+
+Your job now:
+Audit the existing implementation, fix weak areas, remove fake or incomplete behavior, improve Windows local usability, strengthen the agent orchestration, and leave the repo in a state that is genuinely runnable, testable, and useful for real medium-sized frontend/backend tasks.
+
+Do not respond with only a report.
+Make the code changes.
+
+Priorities, in order:
+
+1. Full implementation audit
+
+* Inspect the whole codebase for fake modules, placeholder logic, incomplete flows, dead code, broken imports, incorrect assumptions, and silent failure paths.
+* Replace pseudo-implementation with real working code wherever possible.
+* If something cannot be fully implemented in this environment, keep the closest real behavior and document it explicitly.
+
+2. End-to-end local run verification
+
+* Verify the app can actually run locally from a fresh clone.
+* Verify dependency installation, dev startup, frontend/backend communication, and WebSocket streaming.
+* Verify that the README instructions are correct and complete.
+* Fix all issues found.
+
+3. Windows-first local usability pass
+
+* Ensure the product works correctly for local usage on Windows, not just inside Replit/Linux assumptions.
+* Fix workspace path handling for Windows paths like:
+
+  * C:\Users\Name\Projects\my-app
+  * paths with spaces
+  * backslashes vs slashes
+* Verify path normalization, safe path resolution, and workspace restriction logic work correctly on Windows.
+* Improve the workspace setup UX if needed to support Windows users clearly.
+
+4. Safety and guardrails hardening
+
+* Audit filesystem sandboxing carefully.
+* Ensure path traversal is impossible.
+* Audit terminal command restrictions and command execution boundaries.
+* Make sure commands always run inside the configured workspace.
+* Improve error messages for blocked or invalid operations.
+* Add explicit safeguards for destructive commands beyond the current minimal blocklist if needed.
+
+5. Agent orchestration upgrade
+   Upgrade the current orchestration to be more execution-oriented and closer in spirit to a Replit-like autonomous workflow, without pretending to be something it is not.
+
+Specifically improve:
+
+* better task planning before acting
+* better selection of relevant files before reading too much
+* more reliable sequencing of:
+  think -> inspect -> decide -> edit -> run -> evaluate -> fix -> summarize
+* clearer stopping conditions
+* retry and repair logic after failed commands
+* prevention of infinite or useless loops
+* stronger final task summaries
+* explicit reporting of:
+
+  * what changed
+  * what commands ran
+  * what passed
+  * what failed
+  * whether the task is complete, partial, or blocked
+
+Do not just rename functions or rewrite comments.
+Make real orchestration improvements in code.
+
+6. Agent loop reliability improvements
+
+* Audit the agent loop for weak reasoning/execution flow.
+* Improve step orchestration, retries, error handling, and final summaries.
+* Ensure the loop does not silently stall.
+* Ensure failed commands are surfaced clearly to the UI.
+* Ensure the UI receives meaningful live progress events.
+
+7. Frontend reliability and UX polish
+
+* Audit the IDE layout and fix rough areas.
+* Ensure file explorer, Monaco editor, terminal/activity tabs, and AI task panel work together consistently.
+* Fix state sync issues, stale data issues, and loading edge cases.
+* Improve empty/error states.
+* Keep the design practical and developer-focused, not decorative.
+
+8. Essential missing capabilities only if lightweight and high-value
+   Implement only the most useful missing pieces if they are feasible without destabilizing the project:
+
+* basic diff/change preview for edited files if not already present
+* cancel running task
+* better task history rendering
+* clear connection status / backend health status
+  Do not add low-value fluff.
+
+9. Automated verification
+   Add the minimum useful automated checks so the repo is not trust-based:
+
+* typecheck
+* lint if practical
+* at least a few focused tests for critical logic:
+
+  * workspace path safety
+  * file tool boundary enforcement
+  * dangerous command blocking
+  * model adapter config validation
+* add runnable scripts for these checks
+
+10. Repository cleanup
+
+* Remove dead files, duplicate configs, misleading artifacts, and anything that should not be in the final repo.
+* Make the structure easier to understand.
+* Ensure package scripts are coherent.
+* Ensure .env.example is accurate.
+* Ensure README reflects the actual final state of the codebase.
+
+11. Final delivery requirements
+    When finished, provide:
+
+* what you audited
+* what you changed
+* what was broken before and is now fixed
+* what orchestration improvements were made specifically
+* what remains limited
+* exact local setup steps for Windows
+* exact local setup steps for WSL/Linux/Mac
+* exact verification commands I should run after cloning
+* the expected startup behavior
+* the exact folder(s) that contain the real backend and frontend entry points
+
+Strict rules:
+
+* Do not spend time on planning documents.
+* Do not create vague TODOs instead of code.
+* Do not claim something is production-ready unless you actually verified it.
+* Prefer one solid, real implementation over many half-implemented ideas.
+* Do not stop at identifying flaws. Think like the person who will be blamed if this ships in its current state.
+
+Before finalizing, you must personally verify:
+
+* install works
+* app starts
+* frontend loads
+* backend responds
+* WebSocket streaming works
+* workspace configuration works
+* Windows path handling is accounted for
+* the README matches reality
+* the orchestration is materially improved in code, not just described
+
+Then give me the final result.

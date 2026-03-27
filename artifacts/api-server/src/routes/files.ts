@@ -1,15 +1,16 @@
 import { Router, type IRouter } from "express";
+import type { Response } from "express";
 import {
   listDirectory,
   readFile,
   writeFile,
   deleteFile,
 } from "../lib/fileTools.js";
-import { SafetyError, isWorkspaceSet } from "../lib/safety.js";
+import { SafetyError, isWorkspaceSet, getWorkspaceRoot } from "../lib/safety.js";
 
 const router: IRouter = Router();
 
-function safetyCheck(res: Parameters<Parameters<IRouter["get"]>[1]>[1]): boolean {
+function safetyCheck(res: Response): boolean {
   if (!isWorkspaceSet()) {
     res.status(400).json({
       error: "no_workspace",
@@ -25,7 +26,6 @@ router.get("/files", async (req, res) => {
   const { path: rawPath } = req.query as { path?: string };
   try {
     const entries = await listDirectory(rawPath || "");
-    const { getWorkspaceRoot } = await import("../lib/safety.js");
     res.json({ entries, workspaceRoot: getWorkspaceRoot() });
   } catch (err) {
     const msg = err instanceof SafetyError ? err.message : String(err);

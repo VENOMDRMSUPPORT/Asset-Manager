@@ -15,7 +15,7 @@ let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
 
 export function initWebSocketServer(server: Server): WebSocketServer {
-  wss = new WebSocketServer({ server, path: "/ws" });
+  wss = new WebSocketServer({ server, path: "/api/ws" });
 
   wss.on("connection", (ws) => {
     clients.add(ws);
@@ -45,7 +45,7 @@ export function initWebSocketServer(server: Server): WebSocketServer {
     ws.send(JSON.stringify({ type: "ping" }));
   });
 
-  logger.info("WebSocket server initialized at /ws");
+  logger.info("WebSocket server initialized at /api/ws");
   return wss;
 }
 

@@ -93,6 +93,7 @@ Every package extends `tsconfig.base.json` which sets `composite: true`.
 
 - `pnpm run build` — runs `typecheck` first, then recursively runs `build` in all packages
 - `pnpm run typecheck` — runs `tsc --build --emitDeclarationOnly` using project references
+- `pnpm run test` — runs `scripts/src/test-safety.ts` and `scripts/src/test-model-config.ts` via tsx
 - `pnpm --filter @workspace/api-server run dev` — run API server in dev mode
 - `pnpm --filter @workspace/workspace-ide run dev` — run frontend in dev mode
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API client and Zod schemas
@@ -109,10 +110,19 @@ The agent runs in a loop of up to 30 steps:
 
 All steps stream in real time to the UI via WebSocket.
 
+## WebSocket
+
+- WebSocket server listens at `/api/ws` (not `/ws`) so Replit's proxy routes it correctly alongside all other `/api` traffic.
+- Frontend connects to `${protocol}//${location.host}/api/ws`.
+- Server sends a `ping` on connect; client responds to keep-alive.
+
 ## Safety Rules
 
 - All file ops are scoped to `WORKSPACE_ROOT` via `path.resolve` + prefix checks
-- Dangerous commands (`rm -rf /`, `mkfs`, etc.) are blocked by regex
+- Absolute paths from clients are explicitly rejected
+- URL-encoded traversal (e.g. `..%2F..%2F`) is decoded and re-checked
+- Windows backslash traversal (`..\..`) is normalized and checked
+- Dangerous commands (`rm -rf /`, `mkfs`, `curl|bash`, etc.) blocked by ~15 regex patterns
 - Commands run with workspace root as `cwd`
 
 ## Packages

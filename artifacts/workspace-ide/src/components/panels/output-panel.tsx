@@ -1,14 +1,25 @@
 import { useState, useRef, useEffect } from 'react';
 import { useIdeStore } from '@/store/use-ide-store';
-import { Terminal, Activity, CheckCircle2, AlertCircle, PlayCircle, Eye, FileEdit, Settings, Trash2 } from 'lucide-react';
+import {
+  Terminal, Activity, CheckCircle2, AlertCircle, PlayCircle,
+  Eye, FileEdit, Settings, Trash2, FileCheck, GitBranch,
+} from 'lucide-react';
 import { format } from 'date-fns';
 
 type TabType = 'agent' | 'terminal';
 
+interface CompletionData {
+  summary?: string;
+  changed_files?: string[];
+  commands_run?: string[];
+  final_status?: string;
+  remaining?: string;
+}
+
 export function OutputPanel() {
   const [activeTab, setActiveTab] = useState<TabType>('agent');
   const { agentLogs, terminalOutput, clearTerminal } = useIdeStore();
-  
+
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const agentEndRef = useRef<HTMLDivElement>(null);
 
@@ -20,12 +31,14 @@ export function OutputPanel() {
     }
   }, [terminalOutput.length, agentLogs.length, activeTab]);
 
+  const doneLog = agentLogs.findLast(l => l.type === 'done');
+  const completionData: CompletionData | null = doneLog?.data ?? null;
+
   return (
     <div className="bg-panel border-r border-panel-border flex flex-col" style={{ gridArea: 'terminal' }}>
-      {/* Tabs Header */}
       <div className="h-10 border-b border-panel-border flex items-center justify-between px-2 shrink-0 bg-background/50">
         <div className="flex items-center gap-1">
-          <button 
+          <button
             onClick={() => setActiveTab('agent')}
             className={`px-3 py-1.5 text-xs font-medium rounded-md flex items-center gap-2 transition-colors
               ${activeTab === 'agent' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-panel'}`}
@@ -36,7 +49,7 @@ export function OutputPanel() {
               <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
             )}
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('terminal')}
             className={`px-3 py-1.5 text-xs font-medium rounded-md flex items-center gap-2 transition-colors
               ${activeTab === 'terminal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-panel'}`}
@@ -45,36 +58,46 @@ export function OutputPanel() {
             Terminal
           </button>
         </div>
-        
+
         {activeTab === 'terminal' && (
-          <button onClick={clearTerminal} className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-panel transition-colors" title="Clear Terminal">
+          <button
+            onClick={clearTerminal}
+            className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-panel transition-colors"
+            title="Clear Terminal"
+          >
             <Trash2 className="w-4 h-4" />
           </button>
         )}
       </div>
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-y-auto bg-[#0a0a0c] p-4 font-mono text-sm hide-scrollbar relative">
+      <div className="flex-1 overflow-y-auto bg-[#0a0a0c] p-4 font-mono text-sm relative">
         {activeTab === 'agent' && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {agentLogs.length === 0 ? (
-              <div className="text-muted-foreground text-center mt-10">No active task running</div>
+              <div className="text-muted-foreground text-center mt-10 text-sm">
+                No active task. Submit a task in the AI panel to see live activity here.
+              </div>
             ) : (
-              agentLogs.map((log, i) => (
-                <AgentLogItem key={i} log={log} />
+              agentLogs.map((log) => (
+                <AgentLogItem key={log.id} log={log} />
               ))
             )}
+
+            {completionData && (
+              <CompletionCard data={completionData} />
+            )}
+
             <div ref={agentEndRef} />
           </div>
         )}
 
         {activeTab === 'terminal' && (
-          <div className="text-gray-300 whitespace-pre-wrap">
+          <div className="text-gray-300 whitespace-pre-wrap break-words">
             {terminalOutput.length === 0 ? (
-              <span className="text-muted-foreground">Terminal is ready...</span>
+              <span className="text-muted-foreground">Terminal output will appear here when the agent runs commands.</span>
             ) : (
-              terminalOutput.map((line, i) => (
-                <div key={i} className="leading-relaxed">{line}</div>
+              terminalOutput.map((chunk, i) => (
+                <span key={i}>{chunk}</span>
               ))
             )}
             <div ref={terminalEndRef} />
@@ -85,44 +108,110 @@ export function OutputPanel() {
   );
 }
 
-function AgentLogItem({ log }: { log: any }) {
-  const getIconAndColor = (type: string) => {
+function AgentLogItem({ log }: { log: { type: string; message: string; timestamp: string; data?: Record<string, unknown> } }) {
+  const getStyle = (type: string) => {
     switch (type) {
-      case 'status': return { icon: PlayCircle, color: 'text-blue-400', bg: 'bg-blue-400/10', border: 'border-blue-400/20' };
-      case 'thought': return { icon: Settings, color: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/20' };
-      case 'file_read': return { icon: Eye, color: 'text-purple-400', bg: 'bg-purple-400/10', border: 'border-purple-400/20' };
-      case 'file_write': return { icon: FileEdit, color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' };
-      case 'command': return { icon: Terminal, color: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-400/20' };
-      case 'error': return { icon: AlertCircle, color: 'text-red-400', bg: 'bg-red-400/10', border: 'border-red-400/20' };
-      case 'done': return { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', border: 'border-green-500/20' };
-      default: return { icon: Activity, color: 'text-gray-400', bg: 'bg-gray-400/10', border: 'border-gray-400/20' };
+      case 'status':      return { icon: PlayCircle,   color: 'text-blue-400',    bg: 'bg-blue-400/10',    border: 'border-blue-400/20' };
+      case 'thought':     return { icon: Settings,     color: 'text-amber-400',   bg: 'bg-amber-400/10',   border: 'border-amber-400/20' };
+      case 'file_read':   return { icon: Eye,          color: 'text-purple-400',  bg: 'bg-purple-400/10',  border: 'border-purple-400/20' };
+      case 'file_write':  return { icon: FileEdit,     color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' };
+      case 'command':     return { icon: Terminal,     color: 'text-cyan-400',    bg: 'bg-cyan-400/10',    border: 'border-cyan-400/20' };
+      case 'command_output': return { icon: Terminal,  color: 'text-gray-400',    bg: 'bg-gray-400/5',     border: 'border-gray-400/10' };
+      case 'error':       return { icon: AlertCircle,  color: 'text-red-400',     bg: 'bg-red-400/10',     border: 'border-red-400/20' };
+      case 'done':        return { icon: CheckCircle2, color: 'text-green-500',   bg: 'bg-green-500/10',   border: 'border-green-500/20' };
+      default:            return { icon: Activity,     color: 'text-gray-400',    bg: 'bg-gray-400/10',    border: 'border-gray-400/20' };
     }
   };
 
-  const { icon: Icon, color, bg, border } = getIconAndColor(log.type);
+  const { icon: Icon, color, bg, border } = getStyle(log.type);
+
+  if (log.type === 'done') {
+    return null;
+  }
 
   return (
-    <div className={`flex gap-3 p-3 rounded-lg border ${bg} ${border} animate-in slide-in-from-left-2 duration-300`}>
-      <div className="mt-0.5">
-        <Icon className={`w-5 h-5 ${color}`} />
+    <div className={`flex gap-3 p-3 rounded-lg border ${bg} ${border}`}>
+      <div className="mt-0.5 shrink-0">
+        <Icon className={`w-4 h-4 ${color}`} />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-1">
-          <span className={`font-semibold uppercase tracking-wider text-xs ${color}`}>{log.type.replace('_', ' ')}</span>
-          <span className="text-xs text-muted-foreground">
+        <div className="flex items-center justify-between mb-0.5 gap-2">
+          <span className={`font-semibold uppercase tracking-wider text-xs ${color}`}>
+            {log.type.replace(/_/g, ' ')}
+          </span>
+          <span className="text-xs text-muted-foreground shrink-0">
             {format(new Date(log.timestamp), 'HH:mm:ss')}
           </span>
         </div>
-        <p className="text-gray-200 text-sm whitespace-pre-wrap">{log.message}</p>
-        
-        {log.data && (
-          <div className="mt-2 p-2 bg-black/40 rounded border border-white/5 overflow-x-auto">
-            <pre className="text-xs text-gray-400">
-              {JSON.stringify(log.data, null, 2)}
-            </pre>
-          </div>
-        )}
+        <p className="text-gray-200 text-sm whitespace-pre-wrap break-words">{log.message}</p>
       </div>
+    </div>
+  );
+}
+
+function CompletionCard({ data }: { data: CompletionData }) {
+  const statusColor = {
+    complete: 'border-green-500/30 bg-green-500/5',
+    partial:  'border-amber-500/30 bg-amber-500/5',
+    blocked:  'border-red-500/30 bg-red-500/5',
+  }[data.final_status ?? 'complete'] ?? 'border-green-500/30 bg-green-500/5';
+
+  const statusLabel = {
+    complete: 'Completed',
+    partial:  'Partially Completed',
+    blocked:  'Blocked',
+  }[data.final_status ?? 'complete'] ?? 'Done';
+
+  const statusIcon = {
+    complete: <CheckCircle2 className="w-4 h-4 text-green-500" />,
+    partial:  <AlertCircle className="w-4 h-4 text-amber-500" />,
+    blocked:  <AlertCircle className="w-4 h-4 text-red-500" />,
+  }[data.final_status ?? 'complete'];
+
+  return (
+    <div className={`rounded-xl border p-4 space-y-3 ${statusColor}`}>
+      <div className="flex items-center gap-2">
+        {statusIcon}
+        <span className="font-semibold text-sm text-foreground">{statusLabel}</span>
+      </div>
+
+      {data.summary && (
+        <p className="text-sm text-gray-200 leading-relaxed">{data.summary}</p>
+      )}
+
+      {data.changed_files && data.changed_files.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+            <FileCheck className="w-3.5 h-3.5" />
+            Files Changed ({data.changed_files.length})
+          </p>
+          <ul className="space-y-0.5">
+            {data.changed_files.map((f, i) => (
+              <li key={i} className="text-xs font-mono text-emerald-400 bg-emerald-400/5 px-2 py-0.5 rounded">{f}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {data.commands_run && data.commands_run.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+            <GitBranch className="w-3.5 h-3.5" />
+            Commands Run ({data.commands_run.length})
+          </p>
+          <ul className="space-y-0.5">
+            {data.commands_run.map((c, i) => (
+              <li key={i} className="text-xs font-mono text-cyan-400 bg-cyan-400/5 px-2 py-0.5 rounded">{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {data.remaining && (
+        <div className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
+          <span className="font-semibold">Remaining: </span>{data.remaining}
+        </div>
+      )}
     </div>
   );
 }
