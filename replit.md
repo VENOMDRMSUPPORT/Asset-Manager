@@ -17,7 +17,7 @@ A browser-based personal AI coding assistant. The user types a task in natural l
 - **Build**: esbuild (ESM bundle)
 - **Frontend**: React + Vite, Monaco editor, Tailwind CSS, Zustand, TanStack Query, Wouter
 - **Real-time**: WebSocket (`ws` package)
-- **AI provider**: Replit OpenAI Integration (primary), ZAI z.ai (local dev fallback)
+- **AI provider**: Z.AI (primary for all local usage), Replit OpenAI Integration (fallback only when no ZAI key)
 
 ## Architecture
 

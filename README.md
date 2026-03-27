@@ -26,7 +26,7 @@ Open **http://localhost:5173** in your browser. Enter a workspace directory path
 
 - **Node.js 20+**
 - **pnpm** (`npm install -g pnpm`)
-- **z.ai API key** (or any OpenAI-compatible provider)
+- **Z.AI API key** — get one at https://z.ai/manage-apikey/apikey-list
 
 ### Windows — Git Bash or WSL required
 
@@ -78,16 +78,42 @@ Edit `.env` (copied from `.env.example`):
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `ZAI_API_KEY` | **Yes** | — | Your z.ai API key |
-| `ZAI_BASE_URL` | No | `https://api.z.ai/v1` | API base URL |
-| `ZAI_MODEL` | No | `z1-32b` | Model name |
+| `ZAI_API_KEY` | **Yes** | — | Your Z.AI API key |
+| `ZAI_BASE_URL` | No | `https://api.z.ai/api/paas/v4/` | Official Z.AI endpoint |
+| `ZAI_MODEL` | No | `glm-5` | Coding/text model |
+| `ZAI_VISION_MODEL` | No | `glm-4.6v` | Vision model (auto-selected when images detected) |
 | `WORKSPACE_ROOT` | No | — | Pre-configure workspace directory |
 
 You do **not** need to set `PORT` when using `pnpm run dev` — the root dev script sets `PORT=3001` for the API server and `PORT=5173` for the frontend automatically.
 
+### Provider selection logic
+
+```
+ZAI_API_KEY set?
+  YES → Z.AI (primary local path)
+        glm-5 for coding tasks (default)
+        glm-4.6v for vision tasks (auto-routed when image content detected)
+  NO  → Replit AI integration (fallback, only when running inside Replit)
+  NEITHER → startup error with setup instructions
+```
+
+Z.AI is always primary for local dev. The Replit AI integration is only a fallback when you are running inside Replit without a ZAI key.
+
+### Z.AI model quick reference
+
+| Model | Type | Cost | Notes |
+|---|---|---|---|
+| `glm-5` | Coding / Agentic | $1/MTok in, $3.2/MTok out | **Default** — SOTA agentic coding |
+| `glm-5-code` | Code-specialist | $1.2/MTok in, $5/MTok out | Code-focused variant |
+| `glm-4.7-flash` | Text | Free | Good for testing / budget use |
+| `glm-4.6v` | Vision | $0.3/MTok in, $0.9/MTok out | **Default vision** — auto-routed |
+| `glm-4.6v-flash` | Vision | Free | Budget vision option |
+
+All models are at base URL: `https://api.z.ai/api/paas/v4/`
+
 ### Swapping the AI provider
 
-Change these values in `.env` to use any OpenAI-compatible provider:
+Set `ZAI_BASE_URL` and `ZAI_API_KEY` in `.env` to use any OpenAI-compatible provider:
 
 ```env
 # OpenAI

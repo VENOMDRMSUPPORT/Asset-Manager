@@ -217,7 +217,15 @@ export function TaskPanel() {
 
 function ErrorDetail({ failure }: { failure: TaskFailureDetail }) {
   const categoryLabel: Record<string, string> = {
-    model: 'AI Model',
+    model: 'AI Provider',
+    missing_api_key: 'Missing Key',
+    invalid_api_key: 'Invalid Key',
+    model_not_found: 'Model Not Found',
+    insufficient_balance: 'Insufficient Balance',
+    rate_limit: 'Rate Limited',
+    network_error: 'Network Error',
+    base_url_error: 'Bad URL',
+    context_length: 'Context Too Long',
     tool: 'Tool',
     command: 'Command',
     workspace: 'Workspace',

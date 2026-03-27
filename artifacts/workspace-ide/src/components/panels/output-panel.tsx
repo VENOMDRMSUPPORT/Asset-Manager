@@ -174,7 +174,15 @@ function AgentLogItem({ log }: { log: { type: string; message: string; timestamp
 
 function FailureCard({ data }: { data: FailureData }) {
   const categoryLabel: Record<string, string> = {
-    model: 'Model / AI Provider',
+    model: 'AI Provider',
+    missing_api_key: 'Missing API Key',
+    invalid_api_key: 'Invalid API Key',
+    model_not_found: 'Model Not Found',
+    insufficient_balance: 'Insufficient Balance',
+    rate_limit: 'Rate Limited',
+    network_error: 'Network Error',
+    base_url_error: 'Bad Base URL',
+    context_length: 'Context Too Long',
     tool: 'Tool Execution',
     command: 'Command Execution',
     workspace: 'Workspace',

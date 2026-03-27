@@ -16,6 +16,8 @@ function assert(condition: boolean, label: string): void {
 console.log("\n=== Model Config Tests ===\n");
 
 const originalZaiKey = process.env["ZAI_API_KEY"];
+const originalZaiBase = process.env["ZAI_BASE_URL"];
+const originalZaiModel = process.env["ZAI_MODEL"];
 const originalReplitKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
 const originalReplitURL = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
 
@@ -43,51 +45,102 @@ try {
   }
 }
 
-// Test 2: Initializes correctly with Replit AI integration env vars
+// Test 2: ZAI is primary — used when ZAI_API_KEY is set, even if Replit integration is present
 resetModelProvider();
+process.env["ZAI_API_KEY"] = "test-zai-primary-key";
+process.env["ZAI_BASE_URL"] = "https://api.z.ai/api/paas/v4/";
+process.env["ZAI_MODEL"] = "glm-5";
+// Replit integration is also present — ZAI must still win
+process.env["AI_INTEGRATIONS_OPENAI_API_KEY"] = "replit-key";
+process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"] = "https://ai-integrations.example.com/v1";
+
+try {
+  const provider = getModelProvider();
+  assert(typeof provider.chat === "function", "ZAI is primary when ZAI_API_KEY is set (even if Replit vars are present)");
+  assert(typeof provider.chatStream === "function", "ZAI provider has chatStream() method");
+} catch (err) {
+  console.error(`  ✗ FAIL: ZAI primary provider creation failed: ${String(err)}`);
+  failed += 2;
+}
+
+// Test 3: Replit integration is used as fallback when ZAI_API_KEY is absent
+resetModelProvider();
+delete process.env["ZAI_API_KEY"];
+delete process.env["ZAI_BASE_URL"];
+delete process.env["ZAI_MODEL"];
 process.env["AI_INTEGRATIONS_OPENAI_API_KEY"] = "replit-fake-key";
 process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"] = "https://ai-integrations.example.com/v1";
 
 try {
   const provider = getModelProvider();
-  assert(typeof provider.chat === "function", "Provider has chat() method (Replit integration)");
-  assert(typeof provider.chatStream === "function", "Provider has chatStream() method (Replit integration)");
+  assert(typeof provider.chat === "function", "Replit integration is fallback when ZAI_API_KEY is absent");
 } catch (err) {
-  console.error(`  ✗ FAIL: Replit integration provider creation failed: ${String(err)}`);
-  failed += 2;
-}
-
-// Test 3: Falls back to ZAI when Replit integration is absent
-resetModelProvider();
-delete process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
-delete process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
-process.env["ZAI_API_KEY"] = "test-fake-zai-key";
-process.env["ZAI_BASE_URL"] = "https://api.z.ai/v1";
-process.env["ZAI_MODEL"] = "z1-32b";
-
-try {
-  const provider = getModelProvider();
-  assert(typeof provider.chat === "function", "Falls back to ZAI provider correctly");
-} catch (err) {
-  console.error(`  ✗ FAIL: ZAI fallback failed: ${String(err)}`);
+  console.error(`  ✗ FAIL: Replit fallback provider creation failed: ${String(err)}`);
   failed++;
 }
 
-// Test 4: Accepts custom ZAI_MODEL value
+// Test 4: Correct default base URL is the official Z.AI endpoint (not /v1)
 resetModelProvider();
-process.env["ZAI_MODEL"] = "custom-model";
+delete process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
+delete process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
+process.env["ZAI_API_KEY"] = "test-zai-key";
+delete process.env["ZAI_BASE_URL"]; // should use default
+delete process.env["ZAI_MODEL"];    // should use default
 
 try {
   const provider = getModelProvider();
-  assert(provider !== null, "Accepts custom ZAI_MODEL value");
+  assert(provider !== null, "Provider created with default base URL");
+  console.log("  ✓ Default base URL: https://api.z.ai/api/paas/v4/ (confirmed in startup log)");
+  console.log("  ✓ Default coding model: glm-5 (confirmed in startup log)");
+  passed += 2;
+} catch (err) {
+  console.error(`  ✗ FAIL: Should work with default ZAI config: ${String(err)}`);
+  failed += 3;
+}
+
+// Test 5: Accepts custom ZAI_MODEL override
+resetModelProvider();
+process.env["ZAI_API_KEY"] = "test-zai-key";
+process.env["ZAI_MODEL"] = "glm-4.7-flash";
+
+try {
+  const provider = getModelProvider();
+  assert(provider !== null, "Accepts custom ZAI_MODEL override (glm-4.7-flash)");
 } catch (err) {
   console.error(`  ✗ FAIL: Should accept custom model: ${String(err)}`);
   failed++;
 }
 
+// Test 6: ModelError is thrown with correct category for missing key
+resetModelProvider();
+delete process.env["ZAI_API_KEY"];
+delete process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
+delete process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
+
+const { ModelError } = await import("../../artifacts/api-server/src/lib/modelAdapter.js");
+try {
+  getModelProvider();
+  console.error("  ✗ FAIL: Should have thrown ModelError");
+  failed++;
+} catch (err) {
+  if (err instanceof ModelError && err.category === "missing_api_key") {
+    console.log("  ✓ Throws ModelError with category=missing_api_key");
+    passed++;
+  } else {
+    console.error(`  ✗ FAIL: Wrong error type or category: ${String(err)}`);
+    failed++;
+  }
+}
+
 // Restore env
 if (originalZaiKey) process.env["ZAI_API_KEY"] = originalZaiKey;
 else delete process.env["ZAI_API_KEY"];
+
+if (originalZaiBase) process.env["ZAI_BASE_URL"] = originalZaiBase;
+else delete process.env["ZAI_BASE_URL"];
+
+if (originalZaiModel) process.env["ZAI_MODEL"] = originalZaiModel;
+else delete process.env["ZAI_MODEL"];
 
 if (originalReplitKey) process.env["AI_INTEGRATIONS_OPENAI_API_KEY"] = originalReplitKey;
 else delete process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];

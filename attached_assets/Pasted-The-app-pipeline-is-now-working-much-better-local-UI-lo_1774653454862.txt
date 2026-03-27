@@ -1,0 +1,128 @@
+The app pipeline is now working much better:
+
+* local UI loads
+* workspace setup works
+* task submission works
+* task lifecycle and failure details are visible
+* silent failures are no longer silent
+
+The current remaining problem is provider correctness and capability routing for Z.AI.
+
+This is the final focused pass.
+
+This is not a redesign.
+This is not a broad product expansion.
+This is a strict Z.AI integration correctness + automatic capability-based model routing task.
+
+Context:
+
+* The product goal is a personal local AI coding assistant.
+* Local usage must be centered around Z.AI as the primary provider.
+* Replit/OpenAI integration may remain useful only for Replit-side testing, but it must not be the main local assumption.
+* The current Z.AI defaults appear stale or incorrect.
+* The local app is now surfacing provider errors clearly, including 429 insufficient balance / no resource package.
+* I want the integration aligned to the current official Z.AI documentation, not guesswork.
+
+Your job:
+Audit and correct the Z.AI provider integration so that local usage is accurate, explicit, verifiable, and properly routed by capability.
+
+What to inspect and fix:
+
+1. Review the current model adapter and environment defaults
+2. Compare them against the current official Z.AI docs
+3. Correct all stale or incorrect assumptions, including:
+
+   * default base URL
+   * default model
+   * request path assumptions
+   * any stale OpenAI-compatible assumptions that no longer match current Z.AI behavior
+4. Make Z.AI the primary local provider path
+5. Keep Replit integration only as an explicit Replit/testing path, not the default local path
+6. Ensure local failure messages are precise when Z.AI rejects a request
+7. Add automatic capability-based model routing so the assistant can choose the right Z.AI model in the background without manual switching
+
+Important:
+
+* Do not keep guessed endpoints or guessed model defaults if the docs say otherwise
+* Use the official Z.AI docs as the source of truth
+* Do not add unnecessary UI complexity for model switching
+* Keep the routing automatic, practical, and transparent to the user
+
+Required outcomes:
+
+1. Correct Z.AI local configuration
+2. Correct and current default base URL
+3. Correct and current default default model for this coding-assistant use case
+4. Clear provider selection logic:
+
+   * local dev => Z.AI primary
+   * Replit-only environment => Replit integration optional/testing path only
+5. A provider health-check or startup diagnostic that makes it obvious whether:
+
+   * API key is present
+   * base URL is valid
+   * model is valid
+   * provider is reachable
+6. Better error mapping for Z.AI-specific failures, including:
+
+   * insufficient balance / no resource package
+   * invalid key
+   * invalid model
+   * invalid endpoint
+   * network/provider error
+7. README and .env.example updated to match the final truth
+8. Exact local verification using a real simple task
+
+Automatic capability-based model routing requirements:
+
+1. Text/coding tasks should default to the best Z.AI text/coding model for this product
+2. If a task includes image attachments or clearly requires visual understanding, automatically route to a vision-capable Z.AI model
+3. If a task is specifically image-generation oriented and the current architecture supports that path cleanly, route to the appropriate Z.AI image model
+4. If image generation is not actually wired yet, document that honestly instead of pretending
+5. Keep the routing invisible during normal usage — no manual model switching required
+6. Log the chosen provider/model and routing reason in backend logs for debugging
+7. If the ideal model is unavailable, use a graceful fallback strategy and surface a clear failure only when necessary
+
+Implementation requirements:
+
+* Update modelAdapter.ts correctly
+* Update .env.example correctly
+* Update README provider setup instructions
+* Add a small explicit provider diagnostic path if practical (startup log or lightweight config/health check)
+* Keep the current architecture intact unless a small structural change is necessary
+* Do not keep Replit-specific assumptions as the default local path
+* Do not add a settings-heavy UX for this
+
+Verification requirements:
+Before finalizing, verify all of the following:
+
+1. Local run with Z.AI configuration
+2. A simple task succeeds end-to-end, such as:
+
+   * create hello.txt with known content
+3. If Z.AI rejects the request, the UI shows the true reason clearly
+4. Backend logs clearly identify:
+
+   * provider chosen
+   * base URL used
+   * model used
+   * routing reason
+   * failure category if any
+5. If an image-attached or vision-style task is supported, verify that routing chooses the vision-capable model correctly
+6. README exactly matches the final local setup
+
+Final response format:
+
+1. What was wrong in the previous Z.AI integration
+2. What official Z.AI behavior/docs you aligned to
+3. What code you changed
+4. Final provider selection logic
+5. Final default base URL and default model(s)
+6. Final routing logic
+7. Final .env.example values
+8. Exact local test(s) you ran
+9. Exact result(s)
+10. Any remaining limitations
+
+Do not stop at analysis.
+Make the code changes.
