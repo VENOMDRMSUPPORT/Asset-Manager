@@ -1,0 +1,116 @@
+A real local run on Ubuntu now reaches the UI successfully, the app shows Connected, workspace setup succeeds, and task submission starts the agent — but task execution fails silently from the user's perspective.
+
+This is the current problem:
+
+* The frontend loads successfully
+* WebSocket shows Connected
+* The workspace is set successfully
+* Submitting a task changes the state to "Agent is working..."
+* Then the task ends in Error
+* But there is no useful visible failure reason in the UI
+* The terminal/activity panels do not surface enough information to diagnose what failed
+* This makes the product hard to trust and hard to debug
+
+Your job now:
+Do one focused debugging + observability pass.
+
+This is not a redesign.
+This is not a planning task.
+Diagnose the real cause of the silent task failure and improve the app so that future failures are easy to understand from both the UI and backend logs.
+
+Required outcomes:
+
+1. Find and fix the current task execution failure in local Ubuntu run
+2. Add strong observability for the full task lifecycle
+3. Surface meaningful failure reasons in the UI
+4. Make backend logs useful enough to diagnose failures quickly
+5. Ensure task history stores the final failure reason, not only a generic Error badge
+6. Ensure agent activity shows actual step-by-step execution events or clear failure events
+7. Ensure terminal output appears when commands are executed, and clearly indicate when no command was run
+8. Keep the current architecture intact unless a small structural change is necessary
+
+Current observed behavior to investigate:
+
+* UI reachable locally
+* Connected status is green
+* Workspace path is valid and set
+* Task submission is accepted
+* Agent becomes active
+* Task eventually lands in Error
+* No actionable visible diagnosis is shown to the user
+
+Focus areas to inspect:
+
+* backend task execution pipeline
+* model adapter call path
+* workspace tools
+* file read/write tools
+* command execution path
+* WebSocket event emission
+* frontend task-state rendering
+* error propagation from backend to frontend
+* cancellation/stuck state transitions
+* whether the task loop crashes before first visible step
+* whether the model/provider call fails silently
+* whether tool errors are swallowed
+* whether task history is storing too little error context
+
+Implement the following observability improvements:
+
+1. Explicit task lifecycle events:
+
+   * queued
+   * started
+   * planning
+   * reading_files
+   * writing_files
+   * running_command
+   * summarizing
+   * completed
+   * failed
+2. Every failed task must carry:
+
+   * a human-readable error title
+   * a technical error detail
+   * the failing step name
+   * whether the failure came from model call, tool call, command execution, workspace validation, or internal orchestration
+3. The UI must render failure details for a selected task, not just a generic error badge
+4. Agent Activity must show the latest emitted events clearly
+5. Backend logs must include structured task ids, step names, and error categories
+6. If no command was actually run, do not imply terminal work happened
+7. If the model provider fails, show whether it was:
+
+   * missing/invalid API key
+   * model name issue
+   * base URL issue
+   * network/provider error
+   * unexpected response shape
+
+Specific request:
+Please reproduce the local failure yourself and identify the actual root cause, not just add generic logs.
+
+Then fix the root cause and add the observability improvements.
+
+Verification requirements:
+Before finalizing, personally verify all of the following in a local-style run:
+
+* app loads
+* workspace can be set
+* a simple task like creating hello.txt succeeds
+* agent activity shows meaningful progress
+* task history stores useful success/failure details
+* a forced failure produces a readable error in the UI
+* backend logs clearly show what failed
+
+Final response format:
+
+1. Root cause of the current silent failure
+2. What code you changed
+3. What observability/logging you added
+4. What the UI now shows on failure
+5. What the backend now logs
+6. Exact local test task(s) you used
+7. Any remaining limitations
+
+Do not stop at analysis.
+Make the code changes.

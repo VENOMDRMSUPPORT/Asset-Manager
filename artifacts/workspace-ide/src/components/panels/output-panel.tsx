@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useIdeStore } from '@/store/use-ide-store';
 import {
   Terminal, Activity, CheckCircle2, AlertCircle, PlayCircle,
-  Eye, FileEdit, Settings, Trash2, FileCheck, GitBranch,
+  Eye, FileEdit, Settings, Trash2, FileCheck, GitBranch, ShieldAlert, Zap,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -14,6 +14,13 @@ interface CompletionData {
   commands_run?: string[];
   final_status?: string;
   remaining?: string;
+}
+
+interface FailureData {
+  title?: string;
+  detail?: string;
+  step?: string;
+  category?: string;
 }
 
 export function OutputPanel() {
@@ -33,6 +40,12 @@ export function OutputPanel() {
 
   const doneLog = agentLogs.findLast(l => l.type === 'done');
   const completionData: CompletionData | null = doneLog?.data ?? null;
+
+  // Find the last error event that has structured failure detail (category field)
+  const lastErrorLog = agentLogs.findLast(l => l.type === 'error' && l.data?.category);
+  const failureData: FailureData | null = (!doneLog && lastErrorLog?.data) ? lastErrorLog.data as FailureData : null;
+
+  const commandCount = agentLogs.filter(l => l.type === 'command').length;
 
   return (
     <div className="bg-panel border-r border-panel-border flex flex-col" style={{ gridArea: 'terminal' }}>
@@ -56,6 +69,9 @@ export function OutputPanel() {
           >
             <Terminal className="w-3.5 h-3.5" />
             Terminal
+            {commandCount > 0 && (
+              <span className="text-xs text-muted-foreground bg-panel-border rounded px-1">{commandCount}</span>
+            )}
           </button>
         </div>
 
@@ -83,7 +99,11 @@ export function OutputPanel() {
               ))
             )}
 
-            {completionData && (
+            {failureData && (
+              <FailureCard data={failureData} />
+            )}
+
+            {completionData && !failureData && (
               <CompletionCard data={completionData} />
             )}
 
@@ -93,7 +113,9 @@ export function OutputPanel() {
 
         {activeTab === 'terminal' && (
           <div className="text-gray-300 whitespace-pre-wrap break-words">
-            {terminalOutput.length === 0 ? (
+            {commandCount === 0 && agentLogs.length > 0 ? (
+              <span className="text-muted-foreground">No commands were executed during this task.</span>
+            ) : terminalOutput.length === 0 ? (
               <span className="text-muted-foreground">Terminal output will appear here when the agent runs commands.</span>
             ) : (
               terminalOutput.map((chunk, i) => (
@@ -125,6 +147,7 @@ function AgentLogItem({ log }: { log: { type: string; message: string; timestamp
 
   const { icon: Icon, color, bg, border } = getStyle(log.type);
 
+  // The done event is rendered as CompletionCard below the list
   if (log.type === 'done') {
     return null;
   }
@@ -145,6 +168,58 @@ function AgentLogItem({ log }: { log: { type: string; message: string; timestamp
         </div>
         <p className="text-gray-200 text-sm whitespace-pre-wrap break-words">{log.message}</p>
       </div>
+    </div>
+  );
+}
+
+function FailureCard({ data }: { data: FailureData }) {
+  const categoryLabel: Record<string, string> = {
+    model: 'Model / AI Provider',
+    tool: 'Tool Execution',
+    command: 'Command Execution',
+    workspace: 'Workspace',
+    orchestration: 'Internal Orchestration',
+    cancelled: 'Cancelled',
+  };
+
+  const categoryIcon: Record<string, React.ReactNode> = {
+    model: <Zap className="w-4 h-4 text-red-400" />,
+    workspace: <ShieldAlert className="w-4 h-4 text-red-400" />,
+    cancelled: <AlertCircle className="w-4 h-4 text-amber-400" />,
+  };
+
+  const icon = categoryIcon[data.category ?? ''] ?? <AlertCircle className="w-4 h-4 text-red-400" />;
+  const isCancelled = data.category === 'cancelled';
+
+  return (
+    <div className={`rounded-xl border p-4 space-y-3 ${isCancelled ? 'border-amber-500/30 bg-amber-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+      <div className="flex items-center gap-2">
+        {icon}
+        <span className={`font-semibold text-sm ${isCancelled ? 'text-amber-400' : 'text-red-400'}`}>
+          {isCancelled ? 'Cancelled' : 'Task Failed'}
+        </span>
+        {data.category && (
+          <span className="ml-auto text-xs text-muted-foreground bg-panel-border px-2 py-0.5 rounded-full">
+            {categoryLabel[data.category] ?? data.category}
+          </span>
+        )}
+      </div>
+
+      {data.title && (
+        <p className="text-sm text-gray-100 font-medium leading-snug">{data.title}</p>
+      )}
+
+      {data.detail && (
+        <pre className={`text-xs whitespace-pre-wrap break-words rounded-lg px-3 py-2 font-mono leading-relaxed ${isCancelled ? 'text-amber-300 bg-amber-400/10 border border-amber-400/20' : 'text-red-300 bg-red-400/10 border border-red-400/20'}`}>
+          {data.detail}
+        </pre>
+      )}
+
+      {data.step && (
+        <p className="text-xs text-muted-foreground">
+          <span className="font-semibold">Failed at step:</span> <code className="font-mono">{data.step}</code>
+        </p>
+      )}
     </div>
   );
 }

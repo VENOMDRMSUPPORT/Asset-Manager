@@ -1,4 +1,4 @@
-import { getModelProvider, type Message } from "./modelAdapter.js";
+import { getModelProvider, ModelError, type Message } from "./modelAdapter.js";
 import { listDirectory, readFile, writeFile } from "./fileTools.js";
 import { runCommand } from "./terminal.js";
 import {
@@ -10,6 +10,7 @@ import {
   addEvent,
   type AgentTask,
   type TaskCompletion,
+  type TaskFailureDetail,
 } from "./sessionManager.js";
 import { broadcastAgentEvent, broadcastTaskUpdate, broadcastTerminalOutput } from "./wsServer.js";
 import { getWorkspaceRoot, isWorkspaceSet } from "./safety.js";
@@ -18,6 +19,26 @@ import { logger } from "./logger.js";
 function emit(taskId: string, type: Parameters<typeof addEvent>[1], message: string, data?: Record<string, unknown>): void {
   const event = addEvent(taskId, type, message, data);
   broadcastAgentEvent(taskId, event);
+}
+
+function failTask(
+  taskId: string,
+  task: AgentTask,
+  summary: string,
+  failure: TaskFailureDetail
+): void {
+  logger.error(
+    { taskId, category: failure.category, step: failure.step, detail: failure.detail },
+    `Task failed [${failure.category}] at step "${failure.step}": ${failure.title}`
+  );
+  emit(taskId, "error", `${failure.title}\n\n${failure.detail}`, {
+    category: failure.category,
+    step: failure.step,
+    title: failure.title,
+    detail: failure.detail,
+  });
+  updateTaskStatus(taskId, "error", summary, undefined, failure);
+  broadcastTaskUpdate(task);
 }
 
 const SYSTEM_PROMPT = `You are DevMind, an expert AI coding assistant that executes software engineering tasks autonomously on a local codebase.
@@ -147,24 +168,29 @@ async function executeAction(
 
   switch (actionType) {
     case "think": {
-      emit(taskId, "thought", String(action["thought"] ?? ""));
+      const thought = String(action["thought"] ?? "");
+      logger.debug({ taskId, actionType: "think" }, `Think: ${thought.slice(0, 120)}`);
+      emit(taskId, "thought", thought);
       return { success: true, output: "Thought noted." };
     }
 
     case "list_dir": {
       const relPath = String(action["path"] ?? "");
+      logger.debug({ taskId, actionType: "list_dir", path: relPath }, "Listing directory");
       emit(taskId, "status", `Listing directory: ${relPath || "workspace root"}`);
       try {
         const entries = await listDirectory(relPath);
         const tree = formatDirectoryTree(entries);
         return { success: true, output: `Directory listing:\n${tree || "(empty)"}` };
       } catch (err) {
+        logger.warn({ taskId, path: relPath, err }, "list_dir failed");
         return { success: false, output: `Error listing directory: ${String(err)}` };
       }
     }
 
     case "read_file": {
       const filePath = String(action["path"] ?? "");
+      logger.debug({ taskId, actionType: "read_file", path: filePath }, "Reading file");
       emit(taskId, "file_read", `Reading: ${filePath}`, { path: filePath });
       try {
         const { content } = await readFile(filePath);
@@ -174,6 +200,7 @@ async function executeAction(
           : content;
         return { success: true, output: `File contents of ${filePath}:\n\`\`\`\n${preview}\n\`\`\`` };
       } catch (err) {
+        logger.warn({ taskId, path: filePath, err }, "read_file failed");
         return { success: false, output: `Error reading file: ${String(err)}` };
       }
     }
@@ -182,11 +209,13 @@ async function executeAction(
       const filePath = String(action["path"] ?? "");
       const content = String(action["content"] ?? "");
       const reason = String(action["reason"] ?? "");
+      logger.debug({ taskId, actionType: "write_file", path: filePath, bytes: content.length }, "Writing file");
       emit(taskId, "file_write", `Writing: ${filePath}`, { path: filePath, reason });
       try {
         await writeFile(filePath, content);
         return { success: true, output: `File written successfully: ${filePath} (${content.length} chars)` };
       } catch (err) {
+        logger.warn({ taskId, path: filePath, err }, "write_file failed");
         return { success: false, output: `Error writing file: ${String(err)}` };
       }
     }
@@ -196,6 +225,7 @@ async function executeAction(
       const requestedTimeoutS = Number(action["timeout"]) || DEFAULT_COMMAND_TIMEOUT_S;
       const timeoutMs = Math.min(Math.max(requestedTimeoutS, 5), MAX_COMMAND_TIMEOUT_S) * 1000;
 
+      logger.info({ taskId, actionType: "run_command", command, timeoutS: timeoutMs / 1000 }, "Running command");
       emit(taskId, "command", `Running: ${command}`, { command, timeoutS: timeoutMs / 1000 });
 
       let outputBuffer = "";
@@ -232,6 +262,8 @@ async function executeAction(
         if (flushTimer) clearTimeout(flushTimer);
         flushOutput();
 
+        logger.info({ taskId, command, exitCode: result.exitCode }, "Command finished");
+
         const stdoutPreview = result.stdout.slice(0, 4000);
         const stderrPreview = result.stderr.slice(0, 2000);
         const output = [
@@ -245,6 +277,7 @@ async function executeAction(
       } catch (err) {
         if (flushTimer) clearTimeout(flushTimer);
         flushOutput();
+        logger.warn({ taskId, command, err }, "Command threw an error");
         return { success: false, output: `Command error: ${String(err)}` };
       }
     }
@@ -262,21 +295,25 @@ async function executeAction(
 export async function runAgentTask(prompt: string): Promise<AgentTask> {
   const task = createTask(prompt);
   const taskId = task.id;
-  const controller = createTaskController(taskId);
+  createTaskController(taskId);
 
   broadcastTaskUpdate(task);
 
   (async () => {
     try {
       updateTaskStatus(taskId, "running");
+      logger.info({ taskId, prompt: prompt.slice(0, 100) }, "Agent task started");
 
-      const wsRoot = isWorkspaceSet() ? getWorkspaceRoot() : "not configured";
-      emit(taskId, "status", `Agent started. Workspace: ${wsRoot}`);
+      const wsRoot = isWorkspaceSet() ? getWorkspaceRoot() : null;
+      emit(taskId, "status", `Agent started. Workspace: ${wsRoot ?? "not configured"}`);
 
-      if (!isWorkspaceSet()) {
-        emit(taskId, "error", "Workspace root is not configured. Set it in the UI before running tasks.");
-        updateTaskStatus(taskId, "error", "Workspace not configured");
-        broadcastTaskUpdate(task);
+      if (!wsRoot) {
+        failTask(taskId, task, "Workspace not configured", {
+          title: "Workspace root is not configured",
+          detail: "Set a workspace directory in the UI before running tasks. The workspace must already exist on disk.",
+          step: "workspace_validation",
+          category: "workspace",
+        });
         return;
       }
 
@@ -284,18 +321,27 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
       try {
         const entries = await listDirectory("");
         workspaceSnapshot = formatDirectoryTree(entries);
-        emit(taskId, "status", "Workspace file tree loaded");
-      } catch {
+        emit(taskId, "status", `Workspace ready (${entries.length} top-level entries)`);
+        logger.debug({ taskId, entries: entries.length }, "Workspace snapshot loaded");
+      } catch (err) {
         workspaceSnapshot = "(could not read workspace)";
+        logger.warn({ taskId, err }, "Could not snapshot workspace — continuing anyway");
       }
 
       let model;
       try {
         model = getModelProvider();
+        logger.info({ taskId }, "Model provider acquired");
       } catch (err) {
-        emit(taskId, "error", `AI model configuration error: ${String(err)}. Check that ZAI_API_KEY is set correctly in your .env file.`);
-        updateTaskStatus(taskId, "error", `Model config error: ${String(err)}`);
-        broadcastTaskUpdate(task);
+        const isModelError = err instanceof ModelError;
+        failTask(taskId, task, `Model configuration error: ${isModelError ? err.message : String(err)}`, {
+          title: isModelError ? err.message : "Failed to initialize AI model",
+          detail: isModelError
+            ? `Category: ${err.category}\nTechnical: ${err.technical}\n\nTip: Copy .env.example to .env in the repo root and fill in ZAI_API_KEY.`
+            : String(err),
+          step: "model_initialization",
+          category: "model",
+        });
         return;
       }
 
@@ -315,14 +361,20 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
 
       while (step < MAX_STEPS) {
         if (isTaskCancelled(taskId)) {
+          logger.info({ taskId, step }, "Task cancelled by user");
           emit(taskId, "status", "Task cancelled by user.");
-          lastSummary = "Cancelled by user.";
-          updateTaskStatus(taskId, "error", lastSummary);
+          updateTaskStatus(taskId, "error", "Cancelled by user.", undefined, {
+            title: "Task cancelled",
+            detail: "The task was stopped by the user.",
+            step: `step_${step}`,
+            category: "cancelled",
+          });
           broadcastTaskUpdate(task);
           return;
         }
 
         step++;
+        logger.debug({ taskId, step, maxSteps: MAX_STEPS }, "Agent step");
         emit(taskId, "status", `Step ${step}/${MAX_STEPS}`);
 
         let responseText = "";
@@ -332,16 +384,29 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
             (chunk) => { responseText += chunk; },
             { maxTokens: 4096, temperature: 0.1 }
           );
+          logger.debug({ taskId, step, responseLength: responseText.length }, "Model response received");
         } catch (err) {
           if (isTaskCancelled(taskId)) {
             emit(taskId, "status", "Task cancelled during model call.");
-            updateTaskStatus(taskId, "error", "Cancelled by user");
+            updateTaskStatus(taskId, "error", "Cancelled by user", undefined, {
+              title: "Task cancelled",
+              detail: "The task was stopped during a model call.",
+              step: `step_${step}`,
+              category: "cancelled",
+            });
             broadcastTaskUpdate(task);
             return;
           }
-          emit(taskId, "error", `Model call failed: ${String(err)}`);
-          updateTaskStatus(taskId, "error", `Model error: ${String(err)}`);
-          broadcastTaskUpdate(task);
+
+          const isModelError = err instanceof ModelError;
+          failTask(taskId, task, `Model error at step ${step}: ${isModelError ? err.message : String(err)}`, {
+            title: isModelError ? err.message : "AI model call failed",
+            detail: isModelError
+              ? `Category: ${err.category}\nTechnical: ${err.technical}`
+              : String(err),
+            step: `step_${step}_model_call`,
+            category: "model",
+          });
           return;
         }
 
@@ -350,14 +415,17 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         const action = parseAction(responseText);
         if (!action) {
           consecutiveParseFailures++;
-          const failMsg = `Could not parse a JSON action from model response (attempt ${consecutiveParseFailures}/${MAX_CONSECUTIVE_PARSE_FAILURES}). Response was:\n${responseText.slice(0, 300)}`;
+          logger.warn({ taskId, step, consecutiveParseFailures, responsePreview: responseText.slice(0, 200) }, "Failed to parse JSON action from model");
+          const failMsg = `Could not parse a valid JSON action from the model response (attempt ${consecutiveParseFailures}/${MAX_CONSECUTIVE_PARSE_FAILURES}).\n\nResponse preview:\n${responseText.slice(0, 300)}`;
           emit(taskId, "error", failMsg);
 
           if (consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
-            const errorMsg = `Model failed to produce valid JSON ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row. Stopping to avoid wasting steps. Try rephrasing your task.`;
-            emit(taskId, "error", errorMsg);
-            updateTaskStatus(taskId, "error", errorMsg);
-            broadcastTaskUpdate(task);
+            failTask(taskId, task, `Model failed to produce valid JSON ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row`, {
+              title: "Model returned invalid responses repeatedly",
+              detail: `The model failed to output valid JSON ${MAX_CONSECUTIVE_PARSE_FAILURES} consecutive times. Last response preview:\n${responseText.slice(0, 500)}`,
+              step: `step_${step}_parse`,
+              category: "orchestration",
+            });
             return;
           }
 
@@ -388,6 +456,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
           completion = { summary, changed_files: changedFiles, commands_run: commandsRun, final_status: finalStatus, remaining };
           lastSummary = summary;
 
+          logger.info({ taskId, step, finalStatus, changedFiles, commandsRun }, "Task completed with done action");
           emit(taskId, "done", summary, {
             changed_files: changedFiles,
             commands_run: commandsRun,
@@ -398,11 +467,17 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         }
 
         const signal = getTaskSignal(taskId);
+        logger.debug({ taskId, step, actionType }, "Executing action");
         const result = await executeAction(action, taskId, signal);
 
         if (isTaskCancelled(taskId)) {
           emit(taskId, "status", "Task cancelled.");
-          updateTaskStatus(taskId, "error", "Cancelled by user");
+          updateTaskStatus(taskId, "error", "Cancelled by user", undefined, {
+            title: "Task cancelled",
+            detail: "The task was stopped after an action completed.",
+            step: `step_${step}_${actionType}`,
+            category: "cancelled",
+          });
           broadcastTaskUpdate(task);
           return;
         }
@@ -416,16 +491,23 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
       }
 
       if (step >= MAX_STEPS && !completion) {
+        logger.warn({ taskId, step }, "Reached maximum step limit");
         emit(taskId, "status", "Reached maximum steps (30). Stopping.");
         lastSummary = "Reached maximum step limit (30). Task may be partially complete.";
       }
 
+      logger.info({ taskId, lastSummary, hasCompletion: !!completion }, "Task finished");
       updateTaskStatus(taskId, "done", lastSummary, completion);
       broadcastTaskUpdate(task);
     } catch (err) {
-      logger.error({ err }, "Agent loop unexpected error");
-      emit(taskId, "error", `Unexpected agent error: ${String(err)}`);
-      updateTaskStatus(taskId, "error", String(err));
+      logger.error({ taskId: task.id, err }, "Agent loop unexpected error");
+      emit(task.id, "error", `Unexpected agent error: ${String(err)}`);
+      updateTaskStatus(task.id, "error", String(err), undefined, {
+        title: "Unexpected internal error",
+        detail: String(err),
+        step: "unknown",
+        category: "orchestration",
+      });
       broadcastTaskUpdate(task);
     }
   })();

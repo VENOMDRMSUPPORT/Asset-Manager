@@ -24,3 +24,8 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+ZAI_API_KEY = "2d886314166e40e6be21662474a8784d.OxMG73VZ6K9PSqUq"

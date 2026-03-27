@@ -1,13 +1,38 @@
 import { useState } from 'react';
 import { useStartAgentTask, useListAgentTasks } from '@workspace/api-client-react';
 import { useIdeStore } from '@/store/use-ide-store';
-import { Bot, Sparkles, Send, Clock, CheckCircle2, Loader2, AlertCircle, X } from 'lucide-react';
+import { Bot, Sparkles, Send, Clock, CheckCircle2, Loader2, AlertCircle, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
 import { getListAgentTasksQueryKey } from '@workspace/api-client-react';
 
+interface TaskFailureDetail {
+  title?: string;
+  detail?: string;
+  step?: string;
+  category?: string;
+}
+
+interface TaskCompletion {
+  summary?: string;
+  final_status?: string;
+  changed_files?: string[];
+  remaining?: string;
+}
+
+interface TaskShape {
+  id: string;
+  prompt: string;
+  status: string;
+  createdAt: string;
+  summary?: string;
+  failureDetail?: TaskFailureDetail;
+  completion?: TaskCompletion;
+}
+
 export function TaskPanel() {
   const [prompt, setPrompt] = useState('');
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const setActiveTask = useIdeStore(s => s.setActiveTask);
   const activeTaskId = useIdeStore(s => s.activeTaskId);
   const isConnected = useIdeStore(s => s.isConnected);
@@ -20,6 +45,7 @@ export function TaskPanel() {
       onSuccess: (data) => {
         setPrompt('');
         setActiveTask(data.taskId);
+        setExpandedTaskId(null);
         queryClient.invalidateQueries({ queryKey: getListAgentTasksQueryKey() });
       },
     },
@@ -48,7 +74,13 @@ export function TaskPanel() {
     }
   };
 
+  const handleTaskClick = (task: TaskShape) => {
+    setActiveTask(task.id);
+    setExpandedTaskId(prev => prev === task.id ? null : task.id);
+  };
+
   const isRunning = isPending || activeTaskId !== null;
+  const tasks = (historyData?.tasks ?? []) as TaskShape[];
 
   return (
     <div className="bg-panel flex flex-col h-full overflow-hidden" style={{ gridArea: 'taskbar' }}>
@@ -119,34 +151,117 @@ export function TaskPanel() {
               <div className="flex justify-center p-4">
                 <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
               </div>
-            ) : !historyData?.tasks || historyData.tasks.length === 0 ? (
+            ) : tasks.length === 0 ? (
               <div className="text-sm text-muted-foreground text-center p-4 bg-background/50 rounded-lg border border-dashed border-panel-border">
                 No tasks yet. Describe a task above to get started.
               </div>
             ) : (
-              historyData.tasks.map((task) => (
-                <div
-                  key={task.id}
-                  className={`p-3 rounded-lg border text-left transition-colors cursor-pointer group
-                    ${activeTaskId === task.id ? 'bg-primary/10 border-primary/30' : 'bg-background hover:bg-panel-border/50 border-panel-border'}`}
-                  onClick={() => setActiveTask(task.id)}
-                >
-                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <p className="text-sm font-medium text-foreground line-clamp-2 leading-snug">
-                      {task.prompt}
-                    </p>
-                    <StatusIcon status={task.status} />
+              tasks.map((task) => {
+                const isExpanded = expandedTaskId === task.id;
+                const hasDetail = task.status === 'error'
+                  ? !!(task.failureDetail?.title || task.summary)
+                  : !!(task.completion?.summary || task.summary);
+
+                return (
+                  <div
+                    key={task.id}
+                    className={`rounded-lg border text-left transition-colors
+                      ${activeTaskId === task.id ? 'bg-primary/10 border-primary/30' : 'bg-background hover:bg-panel-border/50 border-panel-border'}`}
+                  >
+                    <div
+                      className="p-3 cursor-pointer"
+                      onClick={() => handleTaskClick(task)}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <p className="text-sm font-medium text-foreground line-clamp-2 leading-snug flex-1">
+                          {task.prompt}
+                        </p>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <StatusIcon status={task.status} />
+                          {hasDetail && (
+                            isExpanded
+                              ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
+                              : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}</span>
+                        <span className="capitalize">{task.status}</span>
+                      </div>
+                    </div>
+
+                    {isExpanded && hasDetail && (
+                      <div className="px-3 pb-3 border-t border-panel-border/50 pt-2.5 space-y-2">
+                        {task.status === 'error' && task.failureDetail ? (
+                          <ErrorDetail failure={task.failureDetail} />
+                        ) : task.status === 'error' && task.summary ? (
+                          <p className="text-xs text-red-400 leading-relaxed">{task.summary}</p>
+                        ) : task.completion ? (
+                          <SuccessDetail completion={task.completion} />
+                        ) : task.summary ? (
+                          <p className="text-xs text-muted-foreground leading-relaxed">{task.summary}</p>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}</span>
-                    <span className="capitalize">{task.status}</span>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ErrorDetail({ failure }: { failure: TaskFailureDetail }) {
+  const categoryLabel: Record<string, string> = {
+    model: 'AI Model',
+    tool: 'Tool',
+    command: 'Command',
+    workspace: 'Workspace',
+    orchestration: 'Internal',
+    cancelled: 'Cancelled',
+  };
+
+  return (
+    <div className="space-y-1.5">
+      {failure.category && (
+        <span className="text-xs bg-red-500/20 text-red-400 border border-red-500/20 px-2 py-0.5 rounded-full inline-block">
+          {categoryLabel[failure.category] ?? failure.category} error
+        </span>
+      )}
+      {failure.title && (
+        <p className="text-xs text-red-300 font-medium leading-snug">{failure.title}</p>
+      )}
+      {failure.detail && (
+        <pre className="text-xs text-red-400/80 bg-red-400/5 border border-red-400/10 rounded p-2 whitespace-pre-wrap break-words font-mono leading-relaxed">
+          {failure.detail}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function SuccessDetail({ completion }: { completion: TaskCompletion }) {
+  return (
+    <div className="space-y-1.5">
+      {completion.summary && (
+        <p className="text-xs text-muted-foreground leading-relaxed">{completion.summary}</p>
+      )}
+      {completion.changed_files && completion.changed_files.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {completion.changed_files.map((f, i) => (
+            <span key={i} className="text-xs font-mono text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded">
+              {f}
+            </span>
+          ))}
+        </div>
+      )}
+      {completion.remaining && (
+        <p className="text-xs text-amber-400">{completion.remaining}</p>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./env-loader.js";
 import http from "http";
 import app from "./app.js";
 import { logger } from "./lib/logger.js";

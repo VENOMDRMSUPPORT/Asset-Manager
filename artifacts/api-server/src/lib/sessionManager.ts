@@ -27,6 +27,13 @@ export interface TaskCompletion {
   remaining: string;
 }
 
+export interface TaskFailureDetail {
+  title: string;
+  detail: string;
+  step: string;
+  category: "model" | "tool" | "command" | "workspace" | "orchestration" | "cancelled";
+}
+
 export interface AgentTask {
   id: string;
   prompt: string;
@@ -36,6 +43,7 @@ export interface AgentTask {
   events: AgentEvent[];
   summary?: string;
   completion?: TaskCompletion;
+  failureDetail?: TaskFailureDetail;
 }
 
 const tasks = new Map<string, AgentTask>();
@@ -107,7 +115,8 @@ export function updateTaskStatus(
   taskId: string,
   status: TaskStatus,
   summary?: string,
-  completion?: TaskCompletion
+  completion?: TaskCompletion,
+  failureDetail?: TaskFailureDetail
 ): void {
   const task = tasks.get(taskId);
   if (!task) return;
@@ -122,5 +131,8 @@ export function updateTaskStatus(
   }
   if (completion !== undefined) {
     task.completion = completion;
+  }
+  if (failureDetail !== undefined) {
+    task.failureDetail = failureDetail;
   }
 }

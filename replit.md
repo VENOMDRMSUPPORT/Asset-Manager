@@ -17,7 +17,7 @@ A browser-based personal AI coding assistant. The user types a task in natural l
 - **Build**: esbuild (ESM bundle)
 - **Frontend**: React + Vite, Monaco editor, Tailwind CSS, Zustand, TanStack Query, Wouter
 - **Real-time**: WebSocket (`ws` package)
-- **AI provider**: z.ai (OpenAI-compatible, swappable via env vars)
+- **AI provider**: Replit OpenAI Integration (primary), ZAI z.ai (local dev fallback)
 
 ## Architecture
 
@@ -26,12 +26,13 @@ Browser (React + Monaco)
      |  HTTP + WebSocket
      v
 Local Node.js Server (Express, artifacts/api-server)
+  ├── env-loader.ts              → loads .env from repo root (fixes monorepo dotenv path)
   ├── Safety Layer (lib/safety.ts)     → enforces workspace root scoping
   ├── File Tools (lib/fileTools.ts)    → read/write/create/delete files
   ├── Terminal (lib/terminal.ts)       → runs shell commands in workspace
-  ├── Model Adapter (lib/modelAdapter.ts) → z.ai (OpenAI-compatible API)
+  ├── Model Adapter (lib/modelAdapter.ts) → OpenAI-compatible (Replit integration or ZAI)
   ├── Agent Loop (lib/agentLoop.ts)    → orchestrates full task execution
-  ├── Session Manager (lib/sessionManager.ts) → in-memory task storage
+  ├── Session Manager (lib/sessionManager.ts) → in-memory task storage + failure details
   └── WS Server (lib/wsServer.ts)     → WebSocket for real-time streaming
 ```
 
@@ -42,13 +43,14 @@ artifacts-monorepo/
 ├── artifacts/
 │   ├── api-server/           # Express API server + agent backend
 │   │   └── src/
+│   │       ├── env-loader.ts         # Loads .env from repo root (3 dirs up)
 │   │       ├── lib/
 │   │       │   ├── safety.ts         # Filesystem safety + workspace scoping
 │   │       │   ├── fileTools.ts      # File read/write/list/delete
 │   │       │   ├── terminal.ts       # Shell command execution
-│   │       │   ├── modelAdapter.ts   # z.ai/OpenAI adapter
+│   │       │   ├── modelAdapter.ts   # Dual-provider: Replit OpenAI or ZAI
 │   │       │   ├── agentLoop.ts      # Agent orchestration loop (up to 30 steps)
-│   │       │   ├── sessionManager.ts # In-memory task + event storage
+│   │       │   ├── sessionManager.ts # In-memory task + event + failureDetail storage
 │   │       │   └── wsServer.ts       # WebSocket broadcast server
 │   │       └── routes/
 │   │           ├── workspace.ts      # GET/POST /api/workspace
@@ -75,12 +77,28 @@ artifacts-monorepo/
 
 ## Environment Variables
 
-Required in `.env`:
-- `ZAI_API_KEY` — z.ai API key (required for agent to work)
+### In Replit (auto-configured, no manual setup needed)
+- `AI_INTEGRATIONS_OPENAI_BASE_URL` — Replit AI proxy URL (set by `setupReplitAIIntegrations`)
+- `AI_INTEGRATIONS_OPENAI_API_KEY` — Replit AI proxy key (set by `setupReplitAIIntegrations`)
+
+### In local `.env` file (for local dev without Replit)
+- `ZAI_API_KEY` — z.ai API key (required for local agent to work)
 - `ZAI_BASE_URL` — defaults to `https://api.z.ai/v1`
-- `ZAI_MODEL` — defaults to `z1-32b`
+- `ZAI_MODEL` — model name override (defaults to `z1-32b` for ZAI, `gpt-5.2` for Replit)
 - `WORKSPACE_ROOT` — optional pre-configured workspace directory
-- `PORT` — server port (auto-assigned by Replit)
+- `PORT` — server port (auto-assigned by Replit, defaults to 3001 locally)
+
+**Important**: The `.env` file must live at the **repo root** (`/home/runner/workspace/.env`).
+`env-loader.ts` uses `import.meta.url` to locate the repo root from the api-server package, regardless of `process.cwd()`.
+
+## AI Provider Resolution
+
+The model adapter checks providers in priority order:
+1. **Replit OpenAI Integration** — uses `AI_INTEGRATIONS_OPENAI_BASE_URL` + `AI_INTEGRATIONS_OPENAI_API_KEY`. Model: `gpt-5.2`
+2. **ZAI (z.ai)** — uses `ZAI_API_KEY` + `ZAI_BASE_URL`. Model: `ZAI_MODEL` env var or `z1-32b`
+3. **Error** — emits a structured `ModelError` with category `missing_api_key` if neither is set
+
+Model errors are categorized: `missing_api_key | invalid_api_key | model_not_found | base_url_error | network_error | rate_limit | context_length | unexpected_response | unknown`
 
 ## TypeScript & Composite Projects
 
@@ -94,7 +112,7 @@ Every package extends `tsconfig.base.json` which sets `composite: true`.
 - `pnpm run dev` — start API server (port 3001) + frontend (port 5173) concurrently via `concurrently`
 - `pnpm run build` — runs `typecheck` first, then recursively runs `build` in all packages
 - `pnpm run typecheck` — runs `tsc --build` then checks all packages including scripts
-- `pnpm run test` — runs `scripts/src/test-safety.ts` and `scripts/src/test-model-config.ts` via tsx
+- `pnpm run test` — runs `scripts/src/test-safety.ts` and `scripts/src/test-model-config.ts` via tsx (33 total tests)
 - `pnpm --filter @workspace/api-server run dev` — API server only (tsx watch, port from PORT env or default 3001)
 - `pnpm --filter @workspace/workspace-ide run dev` — frontend only (Vite, port from PORT env or default 5173)
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API client and Zod schemas
@@ -107,6 +125,20 @@ The root `dev` script always sets:
 
 Vite proxies `/api` (HTTP) and `/api/ws` (WebSocket) from port 5173 to the API server at port 3001, **only when not in Replit** (`REPL_ID` is absent). In Replit, the infrastructure proxy handles `/api` routing directly.
 
+## Task Observability
+
+Each task in the session manager stores:
+- `events[]` — full event stream (status, thought, file_read, file_write, command, command_output, error, done)
+- `summary` — final human-readable summary
+- `completion` — structured completion data (changed_files, commands_run, final_status, remaining)
+- `failureDetail` — structured failure info (title, detail, step, category) — only on error status
+
+Failure categories: `model | tool | command | workspace | orchestration | cancelled`
+
+The UI surfaces failure details in:
+- **Agent Activity panel** — red FailureCard with title, technical detail, step, and category badge
+- **Task History** — expandable error detail per card showing failure category + message
+
 ## Agent Loop
 
 The agent runs in a loop of up to 30 steps:
@@ -115,9 +147,9 @@ The agent runs in a loop of up to 30 steps:
 3. `read_file` — read file contents before editing
 4. `write_file` — apply changes one file at a time
 5. `run_command` — execute shell commands in workspace context
-6. `done` — report summary
+6. `done` — report summary (complete | partial | blocked)
 
-All steps stream in real time to the UI via WebSocket.
+All steps stream in real time to the UI via WebSocket. Backend uses structured pino logging with `taskId`, `step`, `actionType`, `category` on every log line.
 
 ## WebSocket
 
