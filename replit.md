@@ -91,12 +91,21 @@ Every package extends `tsconfig.base.json` which sets `composite: true`.
 
 ## Root Scripts
 
+- `pnpm run dev` — start API server (port 3001) + frontend (port 5173) concurrently via `concurrently`
 - `pnpm run build` — runs `typecheck` first, then recursively runs `build` in all packages
-- `pnpm run typecheck` — runs `tsc --build --emitDeclarationOnly` using project references
+- `pnpm run typecheck` — runs `tsc --build` then checks all packages including scripts
 - `pnpm run test` — runs `scripts/src/test-safety.ts` and `scripts/src/test-model-config.ts` via tsx
-- `pnpm --filter @workspace/api-server run dev` — run API server in dev mode
-- `pnpm --filter @workspace/workspace-ide run dev` — run frontend in dev mode
+- `pnpm --filter @workspace/api-server run dev` — API server only (tsx watch, port from PORT env or default 3001)
+- `pnpm --filter @workspace/workspace-ide run dev` — frontend only (Vite, port from PORT env or default 5173)
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API client and Zod schemas
+
+## Local Dev Port Coordination
+
+The root `dev` script always sets:
+- `PORT=3001` for the API server
+- `PORT=5173 BASE_PATH=/ VITE_API_PORT=3001` for the frontend
+
+Vite proxies `/api` (HTTP) and `/api/ws` (WebSocket) from port 5173 to the API server at port 3001, **only when not in Replit** (`REPL_ID` is absent). In Replit, the infrastructure proxy handles `/api` routing directly.
 
 ## Agent Loop
 

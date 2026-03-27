@@ -1,0 +1,69 @@
+A real local bring-up test on Ubuntu exposed remaining local developer experience gaps.
+
+You need to do one final local-dev correctness pass focused only on making fresh-clone local execution actually work cleanly.
+
+This is not a redesign task.
+It is a correctness and usability fix pass.
+
+Observed issues from a real Ubuntu VM run:
+
+1. `pnpm install` succeeds.
+2. `pnpm run test` succeeds fully.
+3. `pnpm run typecheck` fails in `scripts` because the test files import code outside the configured TypeScript root boundary.
+4. `pnpm run dev` from the repo root fails because there is no root `dev` script.
+5. The README currently implies a simple root-level dev flow, but the actual repo structure requires separate frontend/backend startup and local coordination.
+6. Local frontend/backend startup should work cleanly from a fresh clone without relying on Replit-specific proxy behavior.
+
+Your job:
+Fix the repository so that local development on Ubuntu/Linux works cleanly and matches the docs.
+
+Required outcomes:
+
+1. `pnpm install` works from root
+2. `pnpm run test` works from root
+3. `pnpm run typecheck` works from root
+4. `pnpm run dev` works from root
+5. The app becomes reachable locally in a clean documented way
+6. Frontend/backend/API/WebSocket integration works locally without Replit-only assumptions
+7. README exactly matches the real local run flow
+
+Implementation requirements:
+
+* Fix the TypeScript configuration issue in `scripts` properly, not with a hacky workaround
+* Add a real root-level `dev` script
+* Use a clean local multi-process dev strategy if needed (for example concurrently or an equivalent approach)
+* Ensure frontend and backend ports are coordinated clearly
+* Ensure local API and WebSocket traffic work correctly outside Replit
+* If Vite proxying is required for `/api` and `/api/ws`, implement it correctly
+* Remove any hidden dependence on Replit routing assumptions for local development
+* Keep the current architecture intact unless a small structural fix is necessary
+
+Verification requirements:
+Before finalizing, you must personally verify from a fresh local-style workflow that:
+
+* `pnpm install`
+* `pnpm run test`
+* `pnpm run typecheck`
+* `pnpm run dev`
+
+all work from the repo root.
+
+Then verify:
+
+* frontend loads
+* backend responds
+* WebSocket connects
+* task submission path is still wired correctly
+* README reflects the final truth
+
+Final response format:
+
+1. What was broken
+2. What you changed
+3. Exact final root scripts
+4. Exact local startup behavior
+5. Exact ports used
+6. Whether any known local limitations remain
+
+Do not stop at analysis. Make the code changes.
+Do not leave the repo in a state where local development still requires manual tribal knowledge.
