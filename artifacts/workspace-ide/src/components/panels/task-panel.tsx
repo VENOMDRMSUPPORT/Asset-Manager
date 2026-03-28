@@ -4,7 +4,7 @@ import { useIdeStore } from '@/store/use-ide-store';
 import { useGetWorkspace, useSetWorkspace } from '@workspace/api-client-react';
 import {
   Bot, Sparkles, Send, Clock, CheckCircle2, Loader2, AlertCircle,
-  X, ChevronDown, ChevronUp, Trash2, FolderOpen,
+  X, ChevronDown, ChevronUp, Trash2, FolderOpen, Eye,
 } from 'lucide-react';
 import { formatDistanceToNow, formatDuration, intervalToDuration } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
@@ -47,10 +47,17 @@ export function TaskPanel() {
   const [prompt, setPrompt] = useState('');
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const setActiveTask = useIdeStore(s => s.setActiveTask);
+
+  // ── Store selectors ──────────────────────────────────────────────────────────
+  // activeTaskId  → non-null only while a task is RUNNING  (controls composer lock)
+  // viewingTaskId → which task's logs appear in output panel (survives completion)
+  const startActiveTask = useIdeStore(s => s.startActiveTask);
   const clearActiveTask = useIdeStore(s => s.clearActiveTask);
-  const activeTaskId = useIdeStore(s => s.activeTaskId);
-  const isConnected = useIdeStore(s => s.isConnected);
+  const setViewingTask  = useIdeStore(s => s.setViewingTask);
+  const activeTaskId    = useIdeStore(s => s.activeTaskId);
+  const viewingTaskId   = useIdeStore(s => s.viewingTaskId);
+  const isConnected     = useIdeStore(s => s.isConnected);
+
   const queryClient = useQueryClient();
 
   const { data: historyData, isLoading: isLoadingHistory } = useListAgentTasks();
@@ -60,7 +67,8 @@ export function TaskPanel() {
     mutation: {
       onSuccess: (data) => {
         setPrompt('');
-        setActiveTask(data.taskId);
+        // Mark the new task as actively running AND auto-focus its log output
+        startActiveTask(data.taskId);
         setExpandedTaskId(null);
         queryClient.invalidateQueries({ queryKey: getListAgentTasksQueryKey() });
       },
@@ -78,6 +86,7 @@ export function TaskPanel() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Block only if a task is truly running — not just because one is selected
     if (!prompt.trim() || isPending || activeTaskId) return;
     startTask({ data: { prompt: prompt.trim() } });
   };
@@ -118,11 +127,15 @@ export function TaskPanel() {
   };
 
   const handleTaskClick = (task: TaskShape) => {
-    setActiveTask(task.id);
+    // Only switch which task the output panel displays.
+    // Never touch activeTaskId here — that would lock the composer incorrectly.
+    setViewingTask(task.id);
     setExpandedTaskId(prev => prev === task.id ? null : task.id);
   };
 
+  // Composer is locked only while a task is truly running
   const isRunning = isPending || activeTaskId !== null;
+
   const tasks = (historyData?.tasks ?? []) as TaskShape[];
 
   return (
@@ -139,10 +152,10 @@ export function TaskPanel() {
         </div>
       </div>
 
-      {/* ── Scrollable middle: active task banner + task history ─────── */}
+      {/* ── Scrollable middle ─────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
 
-        {/* Active task running banner */}
+        {/* Running task banner — shown ONLY while a task is truly running */}
         {activeTaskId && (
           <div className="px-4 pt-3 pb-0 shrink-0">
             <div className="p-3 rounded-lg border border-primary/20 bg-primary/10 flex items-center justify-between">
@@ -205,8 +218,10 @@ export function TaskPanel() {
               </div>
             ) : (
               tasks.map((task) => {
-                const isExpanded = expandedTaskId === task.id;
-                const hasDetail = task.status === 'error'
+                const isExpanded   = expandedTaskId === task.id;
+                const isActive     = activeTaskId === task.id;   // currently running
+                const isViewing    = viewingTaskId === task.id;  // output panel is showing this
+                const hasDetail    = task.status === 'error'
                   ? !!(task.failureDetail?.title || task.summary)
                   : !!(task.completion?.summary || task.summary);
 
@@ -214,7 +229,12 @@ export function TaskPanel() {
                   <div
                     key={task.id}
                     className={`rounded-lg border text-left transition-colors
-                      ${activeTaskId === task.id ? 'bg-primary/10 border-primary/30' : 'bg-background hover:bg-panel-border/50 border-panel-border'}`}
+                      ${isActive
+                        ? 'bg-primary/10 border-primary/30'
+                        : isViewing
+                          ? 'bg-background border-primary/20 ring-1 ring-primary/20'
+                          : 'bg-background hover:bg-panel-border/50 border-panel-border'
+                      }`}
                   >
                     <div
                       className="p-3 cursor-pointer"
@@ -225,6 +245,11 @@ export function TaskPanel() {
                           {task.prompt}
                         </p>
                         <div className="flex items-center gap-1 shrink-0">
+                          {isViewing && !isActive && (
+                            <span title="Currently viewing in output panel">
+                              <Eye className="w-3 h-3 text-primary/60" />
+                            </span>
+                          )}
                           <StatusIcon status={task.status} />
                           {hasDetail && (
                             isExpanded
@@ -285,7 +310,11 @@ export function TaskPanel() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isRunning ? 'Agent is working…' : 'Describe what you want to build or fix.\n⌘/Ctrl+Enter to submit.'}
+            placeholder={
+              isRunning
+                ? 'Agent is working…'
+                : 'Describe what you want to build or fix.\n⌘/Ctrl+Enter to submit.'
+            }
             className="w-full h-28 bg-background border border-panel-border rounded-xl p-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none transition-all"
             disabled={isRunning}
           />
@@ -316,6 +345,7 @@ function ErrorDetail({ failure }: { failure: TaskFailureDetail }) {
     invalid_api_key: 'Invalid Key',
     model_not_found: 'Model Not Found',
     insufficient_balance: 'Insufficient Balance',
+    entitlement_error: 'Access Denied',
     rate_limit: 'Rate Limited',
     network_error: 'Network Error',
     base_url_error: 'Bad URL',

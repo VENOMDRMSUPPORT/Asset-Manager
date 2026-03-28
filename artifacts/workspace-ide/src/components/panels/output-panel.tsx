@@ -1,10 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useIdeStore } from '@/store/use-ide-store';
+import { useIdeStore, AgentLogEvent } from '@/store/use-ide-store';
 import {
   Terminal, Activity, CheckCircle2, AlertCircle, PlayCircle,
   Eye, FileEdit, Settings, Trash2, FileCheck, GitBranch, ShieldAlert, Zap, Copy, Check,
 } from 'lucide-react';
 import { format } from 'date-fns';
+
+// Stable empty array — returned as the agentLogs default so Zustand never
+// sees a new array reference when there are no logs, preventing infinite loops.
+const EMPTY_LOGS: AgentLogEvent[] = [];
 
 type TabType = 'agent' | 'terminal';
 
@@ -61,7 +65,18 @@ export function OutputPanel() {
   const [activeTab, setActiveTab] = useState<TabType>('agent');
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
-  const { agentLogs, terminalOutput, clearTerminal } = useIdeStore();
+
+  // Pull each piece of state separately so selectors always return stable
+  // references and Zustand's Object.is check never triggers a false re-render.
+  const viewingTaskId = useIdeStore(s => s.viewingTaskId);
+  const activeTaskId  = useIdeStore(s => s.activeTaskId);
+  const taskLogs      = useIdeStore(s => s.taskLogs);
+  const { terminalOutput, clearTerminal } = useIdeStore();
+
+  // Derive the log array outside of the Zustand selector.
+  // EMPTY_LOGS is a module-level constant, so the reference is always
+  // stable when no logs exist — no new array = no infinite re-render.
+  const agentLogs = (viewingTaskId && taskLogs[viewingTaskId]) || EMPTY_LOGS;
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const agentEndRef = useRef<HTMLDivElement>(null);
@@ -127,7 +142,7 @@ export function OutputPanel() {
           >
             <Activity className="w-3.5 h-3.5" />
             Agent Activity
-            {agentLogs.length > 0 && activeTab !== 'agent' && (
+            {activeTaskId && activeTaskId === viewingTaskId && activeTab !== 'agent' && (
               <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
             )}
           </button>
@@ -183,7 +198,9 @@ export function OutputPanel() {
           <div className="space-y-3">
             {agentLogs.length === 0 ? (
               <div className="text-muted-foreground text-center mt-10 text-sm">
-                No active task. Submit a task in the AI panel to see live activity here.
+                {viewingTaskId
+                  ? 'No activity log available for this task.'
+                  : 'No task selected. Submit a task or click one from history to see activity.'}
               </div>
             ) : (
               agentLogs.map((log) => (

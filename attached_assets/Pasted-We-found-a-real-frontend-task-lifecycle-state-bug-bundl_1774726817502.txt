@@ -1,0 +1,86 @@
+We found a real frontend task-lifecycle/state bug bundle after the recent testing UI pass.
+
+This is not a small cosmetic issue.
+The core problem is that the task panel and output panel do not recover cleanly after task completion.
+
+## Observed broken behavior
+
+1. A task can remain shown as if it is still active even after it has already completed.
+2. The composer can stay locked with “Agent is working...” even though no task is actually running.
+3. After the completion report/log is visible once, it can disappear after normal page interaction and cannot be reopened reliably from task history.
+4. Opening a completed task from history does not reliably restore its execution trace/log details.
+5. After task completion, the UI may have no clear/usable affordance to begin a new task until the page is reloaded.
+6. In practice, a manual page reload is sometimes required to recover the UI.
+
+## What this means
+
+The issue is not just “cancel is broken.”
+The issue is that the frontend task lifecycle / active-task state / task-detail persistence flow is not correctly synchronized.
+
+## Job
+
+Audit and fix the frontend task lifecycle state handling so the task UI remains reliable before, during, and after task completion.
+
+## Required outcomes
+
+### 1) Correct active-task state reset
+- when a task completes, fails, or is cancelled, it must no longer remain treated as the active running task
+- the composer must unlock correctly
+- the “Agent is working...” state must clear correctly
+- the UI must allow starting a new task without requiring a page reload
+
+### 2) Persistent task detail re-open behavior
+- completed/failed/cancelled tasks in task history must be reopenable
+- opening a task from history must restore that task’s execution trace/details in the output/activity panel
+- the displayed task detail must not disappear permanently after normal interaction
+- task details must survive normal UI navigation within the page
+
+### 3) Task-history-driven detail loading
+- if necessary, add explicit frontend state or backend fetch logic so task details can be rehydrated from task history reliably
+- history selection must not depend only on transient in-memory active-task state
+
+### 4) Correct post-completion UI behavior
+- after a task finishes, the UI should clearly transition from active-task mode back to idle-ready mode
+- the composer should be usable again
+- the user should be able to immediately submit another task
+- the output panel should either:
+  - continue showing the last selected task details, or
+  - clearly show that no active task is selected while still allowing history selection
+
+### 5) Preserve the useful testing UX already added
+Do not remove:
+- task durations
+- delete actions
+- copy logs/output
+- workspace switcher
+- right-side panel layout
+- output/activity panel improvements
+
+### 6) Do not over-redesign
+This is a state-management/lifecycle fix, not a product redesign.
+Keep the current layout direction.
+Fix the task lifecycle and task-detail persistence correctly.
+
+## Verification required
+
+You must verify all of these locally and report exact observed behavior:
+
+1. Start a task, let it complete, confirm composer unlocks without reload
+2. Start a second task immediately after completion, without reload
+3. Open a completed task from history and confirm its execution trace/details are shown again
+4. Switch between multiple old tasks in history and confirm the output panel updates correctly each time
+5. Confirm a completed task is not still treated as active
+6. Confirm failed tasks can also be reopened and inspected
+7. Confirm the page no longer requires reload to recover normal usability
+
+## Final response format
+
+1. What I changed
+2. Why the bug happened
+3. How task lifecycle state works now
+4. How completed-task detail reopening works now
+5. Files changed
+6. Verification performed
+7. Remaining risks / not yet solved
+
+Do not stop at analysis. Make the code changes and verify them.

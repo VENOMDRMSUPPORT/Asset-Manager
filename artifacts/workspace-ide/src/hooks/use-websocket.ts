@@ -9,15 +9,20 @@ export function useWebSocket() {
   const queryClient = useQueryClient();
 
   const appendTerminalOutput = useIdeStore(s => s.appendTerminalOutput);
-  const appendAgentLog = useIdeStore(s => s.appendAgentLog);
-  const setActiveTask = useIdeStore(s => s.setActiveTask);
-  const clearActiveTask = useIdeStore(s => s.clearActiveTask);
-  const openFile = useIdeStore(s => s.openFile);
-  const openFiles = useIdeStore(s => s.openFiles);
-  const setConnected = useIdeStore(s => s.setConnected);
+  const appendAgentLog      = useIdeStore(s => s.appendAgentLog);
+  const clearActiveTask     = useIdeStore(s => s.clearActiveTask);
+  const openFile            = useIdeStore(s => s.openFile);
+  const setConnected        = useIdeStore(s => s.setConnected);
 
-  const openFilesRef = useRef(openFiles);
-  openFilesRef.current = openFiles;
+  // Track openFiles and activeTaskId via refs so the WS message handler
+  // always has the current value without needing to be rebuilt on every change.
+  const openFiles    = useIdeStore(s => s.openFiles);
+  const activeTaskId = useIdeStore(s => s.activeTaskId);
+
+  const openFilesRef    = useRef(openFiles);
+  const activeTaskIdRef = useRef(activeTaskId);
+  openFilesRef.current    = openFiles;
+  activeTaskIdRef.current = activeTaskId;
 
   useEffect(() => {
     let unmounted = false;
@@ -49,8 +54,19 @@ export function useWebSocket() {
 
             case 'agent_event': {
               if (!payload.event) break;
-              const ev = payload.event as { type: string; message: string; timestamp: string; data?: Record<string, unknown> };
-              appendAgentLog(ev);
+              const ev = payload.event as {
+                type: string;
+                message: string;
+                timestamp: string;
+                data?: Record<string, unknown>;
+              };
+
+              // Append to the running task's log bucket.
+              // Use ref so we always see the current taskId even inside a stale closure.
+              const runningTaskId = activeTaskIdRef.current;
+              if (runningTaskId) {
+                appendAgentLog(runningTaskId, ev);
+              }
 
               if (ev.type === 'file_write' && ev.data?.path) {
                 const writtenPath = String(ev.data.path);
@@ -63,7 +79,7 @@ export function useWebSocket() {
                       openFile({ path: fileData.path, content: fileData.content, language: fileData.language, isDirty: false });
                     }
                   } catch {
-                    // File refresh failed silently — user can re-open
+                    // File refresh failed silently — user can re-open manually
                   }
                 }
                 queryClient.invalidateQueries({ queryKey: getListFilesQueryKey() });
@@ -79,6 +95,8 @@ export function useWebSocket() {
               queryClient.invalidateQueries({ queryKey: getListAgentTasksQueryKey() });
               const updatedTask = payload.task as { id: string; status: string } | undefined;
               if (updatedTask && (updatedTask.status === 'done' || updatedTask.status === 'error')) {
+                // Unlock the composer. viewingTaskId is intentionally kept so the
+                // output panel continues showing the just-finished task's log.
                 clearActiveTask();
               }
               break;
@@ -96,9 +114,7 @@ export function useWebSocket() {
         reconnectTimeoutRef.current = setTimeout(connect, 2000);
       };
 
-      ws.onerror = () => {
-        ws.close();
-      };
+      ws.onerror = () => { ws.close(); };
     };
 
     connect();
