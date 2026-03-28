@@ -144,7 +144,7 @@ The UI surfaces failure details in:
 
 ## Task Persistence
 
-- Tasks are persisted to `~/.venomgpt/history.json` (canonical); configurable via `VENOMGPT_DATA_DIR` env var; `DEVMIND_DATA_DIR` accepted as a backward-compat alias
+- Tasks are persisted to `~/.venomgpt/history.json` (canonical); configurable via `VENOMGPT_DATA_DIR` env var; `DEVMIND_DATA_DIR` is accepted as a legacy backward-compat alias only (not for new use)
 - Max 100 tasks stored; loaded at server startup
 - Frontend hydrates events on historical task click via `hydrateTaskEvents()` (one-fetch-per-task via `taskLogsLoaded` Set)
 

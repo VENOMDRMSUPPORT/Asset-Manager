@@ -1,0 +1,137 @@
+We need an exceptional cleanup and product-identity correction pass.
+
+The project’s canonical name is **VenomGPT**.
+
+However, the codebase still contains stale internal/product naming such as **DevMind** and older labels from earlier build stages. This is no longer acceptable.
+
+This pass is not optional polish.
+It is a **global product-identity correction pass**.
+
+## Goal
+
+Make the codebase, UI, logs, copy, and developer-facing naming consistently reflect the real product identity:
+
+- **VenomGPT** = canonical project/product name
+- older stale product names such as **DevMind** must be removed or intentionally isolated only where historically unavoidable
+
+## Important distinction
+
+Do NOT blindly replace every string in the repository.
+
+You must perform a careful audit and classify occurrences into categories:
+
+1. **User-facing product identity**
+   - app title
+   - UI labels
+   - empty states
+   - headers
+   - task summaries
+   - visible logs/messages
+   - documentation copy
+   - browser/page titles
+   These should be updated to **VenomGPT**.
+
+2. **Developer/internal identifiers that should also be renamed if safe**
+   - logger prefixes
+   - provider diagnostics labels
+   - persisted data directory names if safe and migration-aware
+   - internal service labels that are effectively product names
+   These should be updated where it is safe and does not break behavior.
+
+3. **Identifiers that should NOT be renamed blindly**
+   - package names if changing them would break workspace wiring without a good reason
+   - protocol/schema fields that are already persisted or externally consumed unless migration is handled
+   - old comments that are historical and clearly not product identity
+   - strings that are not actually naming the product
+   Be deliberate. Do not do destructive naive search-and-replace.
+
+## Specific requirements
+
+### 1) Audit all stale naming
+Search the codebase for:
+- DevMind
+- VENOM AI ASSISTANT
+- Asset Manager (where it is being used as the product name rather than as a generic workspace label)
+- any other stale product-facing names
+
+Classify each occurrence:
+- replace now
+- keep intentionally
+- migrate carefully
+
+### 2) Update user-facing identity to VenomGPT
+Where the app is naming itself as the product, it should say:
+- VenomGPT
+
+Examples:
+- app header / title
+- browser title
+- assistant panel title if appropriate
+- visible completion summaries if branded
+- logger prefix shown to users if it is branding
+- empty states / onboarding text if branded
+
+### 3) Update internal branding where safe
+Where internal labels are effectively the product identity and not just arbitrary code symbols, rename them to reflect VenomGPT where safe.
+
+Be especially careful around:
+- persisted history/data directories
+- local storage keys
+- log prefixes
+- config defaults
+- workspace state labels
+
+If renaming a persisted path/key could break existing local state, add a safe migration or backward-compatible fallback.
+
+### 4) Preserve functionality
+Do not break:
+- local startup
+- task execution
+- history persistence
+- UI state
+- provider routing
+- build/typecheck
+
+### 5) Migration awareness
+If the project currently writes persisted data under an old name such as:
+- `.devmind`
+or similar
+then handle this professionally.
+
+Preferred behavior:
+- VenomGPT becomes the new canonical path/name
+- old path is still read as a fallback/migration source if present
+- avoid silently losing existing local history/config data
+
+### 6) Keep this bounded
+This is a naming/identity correction pass.
+Do not turn it into a broad refactor unrelated to naming consistency.
+
+## Verification required
+
+You must verify and report:
+
+1. All meaningful user-facing product naming now says VenomGPT
+2. No important stale DevMind-style branding remains in active product-facing code
+3. Local startup still works
+4. TypeScript/build checks still pass
+5. History/data persistence still works, including migration behavior if relevant
+6. Any intentionally retained stale names are explicitly listed with reasons
+
+## Final response format
+
+1. What I changed
+2. What stale names were found
+3. What was renamed to VenomGPT
+4. What was intentionally not renamed and why
+5. How migration/backward compatibility was handled
+6. Files changed
+7. Verification performed
+8. Remaining risks / follow-up items
+
+Do not stop at analysis.
+Make the code changes, verify them, and report the real results.
+
+=========================
+ووده برومبوت ال phase السابقه 
+

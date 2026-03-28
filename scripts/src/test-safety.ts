@@ -32,7 +32,7 @@ function assertThrows(fn: () => unknown, expectedMsg: string, label: string): vo
   }
 }
 
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "devmind-safety-test-"));
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "venomgpt-safety-test-"));
 const nestedDir = path.join(tempDir, "project", "src");
 fs.mkdirSync(nestedDir, { recursive: true });
 
