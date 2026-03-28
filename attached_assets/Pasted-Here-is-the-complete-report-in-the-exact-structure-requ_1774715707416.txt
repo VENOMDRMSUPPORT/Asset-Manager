@@ -1,0 +1,152 @@
+Here is the complete report in the exact structure required.
+
+1. What I changed
+Backend — new files:
+
+artifacts/api-server/src/lib/responseNormalizer.ts — complete response normalization layer
+artifacts/api-server/src/lib/zaiCapabilities.ts — Z.AI capability registry + automatic model selection
+Backend — updated files:
+
+artifacts/api-server/src/lib/modelAdapter.ts — uses capability registry for model selection, includes GLM-5.1, full auto-selection logic
+artifacts/api-server/src/lib/agentLoop.ts — uses normalizer, detects conversational prompts before entering loop, structured retry instructions
+artifacts/api-server/src/lib/sessionManager.ts — added deleteTask(), durationMs field on tasks
+artifacts/api-server/src/routes/agent.ts — added DELETE /api/agent/tasks/:taskId endpoint
+Frontend — updated files:
+
+artifacts/workspace-ide/src/components/panels/task-panel.tsx — full layout rework: composer fixed to bottom, task history above, duration display, delete buttons, workspace quick-switcher
+artifacts/workspace-ide/src/components/panels/output-panel.tsx — Copy Logs/Copy button for agent activity and terminal, scroll-position detection + "Jump to latest" button
+2. Why the bug happened
+The old parseAction() function extracted from the first { to the last } in the response. When the model returned multiple JSON objects:
+
+{"action":"think","thought":"..."}
+{"action":"write_file","path":"app.js","content":"..."}
+This produced a string that starts at the first { and ends at the last } — a two-object concatenation that JSON.parse() correctly rejects. This caused the "model returned invalid responses repeatedly" failure even when the model output was logically correct.
+
+For conversational prompts like hi, the model would return readable prose. The old loop counted this as a parse failure and would retry up to 3 times before failing hard — even though there was nothing wrong.
+
+3. How parsing / normalization / repair now work
+New 5-step normalization pipeline in responseNormalizer.ts:
+
+Step	What it does
+0	Classify response as conversational if no { found and text matches greeting patterns — classified, not a parse failure
+1	Direct parse attempt (fast path for perfect model output)
+2	Strip markdown code fences (```json ... ```) and retry parse
+3	Extract all syntactically complete JSON objects using a character-by-character brace-depth scanner
+4	If exactly one action object found, accept it
+5	If multiple action objects found, pick best by priority: done > write_file > run_command > read_file > list_dir > think
+Safety invariants:
+
+Never invents actions
+Malformed or ambiguous output still returns a typed failure (NormalizeFailure)
+All failures have a specific reason: conversational, no_json, malformed, no_action_field, ambiguous
+Retry instructions are now specific per failure reason. buildRetryInstruction() produces a message that states exactly what went wrong, not a generic "your JSON was bad."
+
+Normalization method is logged (direct_parse, fence_stripped, first_extracted, best_selected) so every recovery is visible in debug logs. Warnings are surfaced when multiple objects were found.
+
+4. How non-task prompts are handled now
+Before entering the agent loop, agentLoop.ts checks isConversationalPrompt():
+
+Prompt: "hi" → detected as conversational
+  → Single chat() call with a simple system prompt
+  → Model replies naturally (e.g. "Hello! I'm DevMind. How can I help?")
+  → Emits as thought event, completes with status "done"
+  → Uses GLM-4.7-Flash (free tier, fast, no heavy reasoning needed)
+  → No parse loop, no retry, no failure
+Observed live: hi completed in 2.2 seconds with a clean done status and accurate durationMs — no parse failure, no retry noise.
+
+5. How Z.AI provider naming and capability mapping work now
+zaiCapabilities.ts is the single source of truth for Z.AI. It contains:
+
+Category	Models	Status
+Text/Coding	glm-5.1, glm-5, glm-5-code, glm-5-turbo, glm-4.7, glm-4.7-flash, glm-4.5-flash	implemented
+Vision	glm-4.6v, glm-4.6v-flash	implemented
+Image gen	glm-image, cogview-4	provider_only (different endpoint, not wired)
+Video gen	cogvideox-3	deferred (async polling required)
+Audio STT	glm-asr-2512	deferred (audio endpoint, not wired)
+Each spec includes: contextWindow, maxOutput, priceInputPer1M, callPatterns, implementationStatus, and notes. Provider-only and deferred capabilities are honest about their status — they're represented correctly, not pretended to be fully working.
+
+The startup diagnostic now prints the full registry summary:
+
+Z.AI Capability Registry (13 models)
+  Implemented (9): glm-5.1, glm-5, glm-5-code, glm-5-turbo, glm-4.7, glm-4.7-flash, glm-4.5-flash, glm-4.6v, glm-4.6v-flash
+  Provider-only / not wired (2): glm-image, cogview-4
+  Deferred (2): cogvideox-3, glm-asr-2512
+6. How automatic model selection works now
+selectZaiModel(hint, envOverride?) is called on every request:
+
+Hint	Model chosen	Reason
+agentic (default)	glm-5.1	Latest flagship, SOTA coding, 200K context
+coding	glm-5.1	Same — strongest for code work
+vision	glm-4.6v	SOTA multimodal, image+text input
+conversational	glm-4.7-flash	Free tier, fast, no heavy reasoning needed
+general	glm-4.7-flash	Same — lightweight is appropriate
+GLM-5.1 is now the default for all agent tasks. The ZAI_MODEL env var still works as an override/pin for debugging. Setting it is no longer required — the system makes a good default choice automatically.
+
+If ZAI_MODEL=glm-4.7-flash is set in .env, that overrides everything. The model name and reason are logged at DEBUG level on every step.
+
+7. How Z.AI error handling works now
+All error categories were already in place from the previous pass. The new additions in this pass:
+
+The capability registry makes it clear which calls are sync, streaming, or async_poll — so future async video gen errors can be classified differently from sync completion errors
+The TaskFailureDetail.category type in sessionManager.ts now includes the full set: missing_api_key, invalid_api_key, model_not_found, insufficient_balance, rate_limit, network_error, base_url_error, context_length, tool, command, workspace, orchestration, cancelled
+429s from Z.AI are still distinguished: "balance" in the error body → insufficient_balance; otherwise → rate_limit
+8. How the testing UI changed
+Task panel — new layout:
+
+Composer is now fixed at the bottom of the right panel
+Task history + active task banner occupy the scrollable middle area
+"Task History" header now shows the task count (e.g. "1 task")
+Duration is shown next to each completed task (e.g. "2.2s Done")
+Delete button (trash icon) appears on each non-running task; disabled while deleting, shows spinner
+Workspace quick-switcher appears below the header — shows current path, click "switch" to type a new one
+Output panel:
+
+Copy button appears in the toolbar whenever there's content to copy — copies agent logs as timestamped lines, or raw terminal output
+"Jump to latest" button appears if you've scrolled up while a task is running
+Scroll position is tracked: auto-scroll only if not manually scrolled away
+9. Files changed
+File	Type
+artifacts/api-server/src/lib/responseNormalizer.ts	New
+artifacts/api-server/src/lib/zaiCapabilities.ts	New
+artifacts/api-server/src/lib/modelAdapter.ts	Updated
+artifacts/api-server/src/lib/agentLoop.ts	Updated
+artifacts/api-server/src/lib/sessionManager.ts	Updated
+artifacts/api-server/src/routes/agent.ts	Updated
+artifacts/workspace-ide/src/components/panels/task-panel.tsx	Updated
+artifacts/workspace-ide/src/components/panels/output-panel.tsx	Updated
+10. Verification performed
+Unit tests — normalizer (13/13):
+
+Direct parse, code fence stripping, multi-object selection (done > write_file > think), conversational classification, no-JSON prose, malformed JSON, missing action field, JSON inside prose, nested braces, retry instruction messages, priority ordering
+Unit tests — model config (9/9):
+
+ZAI primary, correct URL, correct model defaults (auto → GLM-5.1), Replit fallback, env override, missing_api_key category
+TypeScript: 0 errors across all packages
+
+Live API verification:
+
+POST /api/agent/tasks with "hi" → completed in 2.2s, status done, natural reply
+durationMs populated on completion
+DELETE /api/agent/tasks/:id → {"success":true} returned
+GET /api/agent/tasks/:id after delete → {"error":"not_found"}
+Server startup diagnostic logs 13-model capability registry correctly
+Server startup log:
+
+[DevMind] AI Provider Diagnostic
+  Provider     : zai
+  Base URL     : https://api.z.ai/api/paas/v4/
+  Model auto   : enabled (GLM-5.1 for coding, GLM-4.6V for vision)
+  Temperature  : enabled
+  Reason       : ZAI_API_KEY is set — using Z.AI as primary provider
+  Z.AI Capability Registry (13 models)
+    Implemented (9): glm-5.1, glm-5, glm-5-code, glm-5-turbo, glm-4.7, glm-4.7-flash, glm-4.5-flash, glm-4.6v, glm-4.6v-flash
+    Provider-only / not wired (2): glm-image, cogview-4
+    Deferred (2): cogvideox-3, glm-asr-2512
+11. Remaining risks / not yet solved
+Item	Status	Notes
+GLM-5.1 confirmation	Assumed from user input	Z.AI docs fetched in prior session listed glm-5 as flagship — glm-5.1 is added to the registry per your requirement. If the model ID differs from what Z.AI actually exposes, set ZAI_MODEL=glm-5 in .env as a pin
+Image generation	Provider-only	glm-image and cogview-4 use POST /images/generations, a different endpoint. Wiring them requires a dedicated tool handler in the agent loop, not just a model selection change
+Video generation	Deferred	cogvideox-3 requires async job submission + polling — a non-trivial flow that shouldn't be faked
+Vision tasks	Infrastructure ready	glm-4.6v is auto-selected when image_url content is in messages. The agent loop currently sends text-only messages; a vision tool would need to pass image URLs into message content
+Workspace switcher in task panel	Uses window.prompt()	Functional but basic — the top-bar inline editor is the polished version. Connecting a proper modal would be cleaner in a future pass
+Z.AI web_search tool integration	Capability registered, not wired	Z.AI exposes a per-use web search capability. The capability spec includes it, but the agent loop doesn't have a tool that invokes it
