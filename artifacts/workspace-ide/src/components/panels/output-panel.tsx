@@ -23,9 +23,44 @@ interface FailureData {
   category?: string;
 }
 
+/**
+ * Safe clipboard write.
+ * 1. Tries the modern Clipboard API (requires secure context + permission).
+ * 2. Falls back to the legacy execCommand('copy') approach via a temporary textarea.
+ * 3. Returns false (never throws) if both methods are unavailable.
+ */
+async function safeWriteToClipboard(text: string): Promise<boolean> {
+  // Modern API — may be undefined in iframes or non-HTTPS contexts
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Permission denied or context mismatch — fall through to execCommand
+    }
+  }
+
+  // Legacy fallback — works in most iframe contexts
+  try {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+    document.body.appendChild(el);
+    el.select();
+    el.setSelectionRange(0, el.value.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export function OutputPanel() {
   const [activeTab, setActiveTab] = useState<TabType>('agent');
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const { agentLogs, terminalOutput, clearTerminal } = useIdeStore();
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -55,16 +90,21 @@ export function OutputPanel() {
   }, [activeTab, agentLogs.length === 0]);
 
   const handleCopyLogs = useCallback(async () => {
-    if (activeTab === 'agent') {
-      const text = agentLogs.map(l =>
-        `[${format(new Date(l.timestamp), 'HH:mm:ss')}] [${l.type.toUpperCase()}] ${l.message}`
-      ).join('\n');
-      await navigator.clipboard.writeText(text);
+    const text = activeTab === 'agent'
+      ? agentLogs.map(l =>
+          `[${format(new Date(l.timestamp), 'HH:mm:ss')}] [${l.type.toUpperCase()}] ${l.message}`
+        ).join('\n')
+      : terminalOutput.join('');
+
+    const ok = await safeWriteToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      setCopyFailed(false);
+      setTimeout(() => setCopied(false), 1800);
     } else {
-      await navigator.clipboard.writeText(terminalOutput.join(''));
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 2500);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
   }, [activeTab, agentLogs, terminalOutput]);
 
   const doneLog = agentLogs.findLast(l => l.type === 'done');
@@ -108,14 +148,18 @@ export function OutputPanel() {
           {hasContent && (
             <button
               onClick={handleCopyLogs}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-panel transition-colors"
-              title={`Copy ${activeTab === 'agent' ? 'agent logs' : 'terminal output'}`}
+              className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded transition-colors
+                ${copyFailed
+                  ? 'text-amber-400 hover:text-amber-300 hover:bg-panel'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-panel'
+                }`}
+              title={copyFailed ? 'Clipboard not available in this context' : `Copy ${activeTab === 'agent' ? 'agent logs' : 'terminal output'}`}
             >
               {copied
                 ? <Check className="w-3.5 h-3.5 text-green-500" />
-                : <Copy className="w-3.5 h-3.5" />
+                : <Copy className={`w-3.5 h-3.5 ${copyFailed ? 'text-amber-400' : ''}`} />
               }
-              <span>{copied ? 'Copied' : 'Copy'}</span>
+              <span>{copied ? 'Copied' : copyFailed ? 'Unavailable' : 'Copy'}</span>
             </button>
           )}
           {activeTab === 'terminal' && (
