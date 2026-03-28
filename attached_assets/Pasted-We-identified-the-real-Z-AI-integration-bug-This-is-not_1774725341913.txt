@@ -1,0 +1,116 @@
+We identified the real Z.AI integration bug.
+
+This is not a bad API key issue, and not a generic balance issue.
+
+We verified with raw API calls that the same key/account behaves differently across Z.AI integration lanes:
+
+Working:
+- `POST /api/anthropic/v1/messages` with `model: "glm-5"`
+- `POST /api/anthropic/v1/messages` with `model: "glm-4.7"`
+- `POST /api/paas/v4/chat/completions` with `model: "glm-4.7-flash"`
+
+Failing:
+- `POST /api/paas/v4/chat/completions` with `model: "glm-5"`
+  returns:
+  `{"error":{"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}}`
+
+This proves Z.AI is not a single uniform provider lane.
+The current implementation is too narrow because it treats Z.AI as if one endpoint family and one model-selection policy are sufficient.
+
+## Job
+
+Fix the Z.AI provider architecture so it supports **multiple integration lanes** correctly.
+
+## Required outcome
+
+Implement explicit support for at least these two Z.AI lanes:
+
+1. **Anthropic-compatible lane**
+   - endpoint family: `/api/anthropic/v1/...`
+   - for models/account access that work there, such as `glm-5` in our verified case
+
+2. **Paas/OpenAI-style lane**
+   - endpoint family: `/api/paas/v4/...`
+   - for models/account access that work there, such as `glm-4.7-flash` in our verified case
+
+## Requirements
+
+### 1) Add lane-aware provider routing
+The Z.AI provider must not assume a single endpoint family.
+
+It must explicitly model:
+- provider lane / API dialect
+- which models belong to which lane(s)
+- which request/response adapter applies per lane
+- which lane should be attempted first for a given task type
+
+### 2) Add model-to-lane compatibility handling
+Model selection must consider:
+- capability need
+- preferred model
+- compatible endpoint lane
+- actual account access realities
+
+Do not choose a model in isolation from the endpoint family used to call it.
+
+### 3) Add fallback across lanes when appropriate
+If the preferred model/lane combination fails with entitlement/package/access errors:
+- attempt a safe fallback
+- that fallback may be:
+  - another model in the same lane
+  - or a different compatible lane with a supported model
+- log clearly what happened
+
+### 4) Preserve the capability registry
+Keep the Z.AI capability registry, but extend it so capability definitions can include:
+- lane / dialect
+- endpoint family
+- implemented status
+- fallback candidates
+
+### 5) Improve diagnostics
+Startup/provider diagnostics should show:
+- available lane support
+- default lane behavior
+- selected lane per request
+- selected model per request
+- fallback lane/model if used
+
+### 6) Improve user-facing error wording
+The current UI wording is misleading for this situation.
+Do not always say “top up balance”.
+For entitlement/resource-package/lane mismatch cases, show broader wording such as:
+- API access unavailable for the selected model/endpoint combination
+- attempted fallback if applicable
+- original provider detail in technical logs
+
+### 7) Keep this bounded
+Do not redesign the whole app.
+Do not remove the current provider abstraction.
+Do not overbuild.
+Do make the Z.AI provider correct for the real multi-lane behavior we verified.
+
+## Verification required
+
+You must verify with real local runs and report exact results for:
+
+1. A conversational prompt like `hi`
+2. A basic file creation task
+3. A command task
+4. A verified anthropic-lane model path
+5. A verified paas-lane model path
+6. A failure case where the preferred lane/model is unavailable and fallback engages correctly
+
+## Final response format
+
+1. What I changed
+2. Why the bug happened
+3. How Z.AI lane-aware routing works now
+4. How fallback across lanes/models works now
+5. How diagnostics changed
+6. How user-facing error wording changed
+7. Files changed
+8. Verification performed
+9. Remaining risks / not yet solved
+
+Do not stop at analysis. Make the code changes and verify them.

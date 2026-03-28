@@ -3,48 +3,59 @@
  *
  * Source of truth: https://docs.z.ai/guides/overview/pricing
  *                  https://docs.z.ai/api-reference/introduction
- *                  https://docs.z.ai/guides/llm/glm-5
  *
- * Official base URL: https://api.z.ai/api/paas/v4/
- * (NOT /v1 — that path does not exist on Z.AI)
+ * Z.AI has TWO distinct API lanes that are separately entitled on the account:
  *
- * This registry:
- *  - Maps every Z.AI model to its full capability set
- *  - Tracks call patterns (sync / streaming / async_poll)
- *  - Clearly marks what is implemented vs deferred
- *  - Powers automatic model selection per task type
- *  - Includes GLM-5.1 (latest flagship as of 2025)
+ *   PAAS lane     — /api/paas/v4/chat/completions  (OpenAI-compatible)
+ *                   Works for:  glm-4.7-flash, glm-4.5-flash, vision models
+ *                   Free-tier models live here.
+ *
+ *   Anthropic lane — /api/anthropic/v1/messages     (Anthropic-compatible)
+ *                   Works for:  glm-5, glm-5.1, glm-4.7 and the broader paid GLM-5 family
+ *                   Uses Anthropic SDK request/response schema.
+ *
+ * Models CANNOT be used on a lane they are not entitled for — the API returns
+ * error code 1113 ("Insufficient balance or no resource package"). This is NOT
+ * the same as running out of credits; it is a model/lane entitlement mismatch.
+ *
+ * The registry marks each model's preferred lane and supported lanes so the
+ * provider can pick the correct endpoint and fall back intelligently.
  */
+
+// ─── Lane types ───────────────────────────────────────────────────────────────
+
+/** The two Z.AI API endpoint families. */
+export type ZaiLane = "paas" | "anthropic";
 
 // ─── Capability types ────────────────────────────────────────────────────────
 
 export type ZaiCapabilityType =
-  | "text_coding"   // Code generation, bug fixing, technical reasoning
-  | "text_general"  // General-purpose text generation
-  | "vision"        // Text + image input
-  | "image_gen"     // Text → image (uses /images/generations endpoint)
-  | "video_gen"     // Text/image → video (async polling required)
-  | "audio_stt"     // Speech-to-text
-  | "tools"         // Function calling / tool use
-  | "structured"    // JSON / structured output mode
-  | "long_context"  // Context window >= 100K tokens
-  | "agentic"       // Long-horizon autonomous task execution
-  | "web_search"    // Built-in web search (paid per-use tool)
-  | "cache";        // KV context caching support
+  | "text_coding"
+  | "text_general"
+  | "vision"
+  | "image_gen"
+  | "video_gen"
+  | "audio_stt"
+  | "tools"
+  | "structured"
+  | "long_context"
+  | "agentic"
+  | "web_search"
+  | "cache";
 
 // ─── Call patterns ───────────────────────────────────────────────────────────
 
 export type ZaiCallPattern =
-  | "sync"        // Synchronous (non-streaming)
-  | "streaming"   // Server-sent events / streaming response
-  | "async_poll"; // Submit job, poll for result (video gen etc.)
+  | "sync"
+  | "streaming"
+  | "async_poll";
 
 // ─── Implementation status ───────────────────────────────────────────────────
 
 export type ZaiImplementationStatus =
-  | "implemented"   // Fully wired into DevMind agent loop
-  | "provider_only" // Z.AI supports it; not yet wired end-to-end in product
-  | "deferred";     // Planned, not started
+  | "implemented"
+  | "provider_only"
+  | "deferred";
 
 // ─── Model spec ──────────────────────────────────────────────────────────────
 
@@ -54,24 +65,30 @@ export interface ZaiModelSpec {
   description: string;
   capabilities: ZaiCapabilityType[];
   callPatterns: ZaiCallPattern[];
-  contextWindow: number;           // tokens
-  maxOutput: number;               // tokens
-  priceInputPer1M: number | null;  // USD, null = free
-  priceOutputPer1M: number | null; // USD, null = free
+  contextWindow: number;
+  maxOutput: number;
+  priceInputPer1M: number | null;
+  priceOutputPer1M: number | null;
   implementationStatus: ZaiImplementationStatus;
+  /** Primary lane to use when calling this model. */
+  preferredLane: ZaiLane;
+  /** All lanes this model is available on (in preference order). */
+  supportedLanes: ZaiLane[];
   notes?: string;
 }
 
-// ─── Z.AI Model Registry ────────────────────────────────────────────────────
+// ─── Z.AI Model Registry ─────────────────────────────────────────────────────
 
 export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
 
-  // ═══ Text / Coding models ══════════════════════════════════════════════════
+  // ═══ Text / Coding models — Anthropic lane ══════════════════════════════════
+  // Verified: glm-5 and glm-4.7 work on /api/anthropic/v1/messages
+  // glm-5.1 assumed same entitlement as glm-5 (same product family)
 
   {
     modelId: "glm-5.1",
     displayName: "GLM-5.1",
-    description: "Latest Z.AI flagship (2025). Stronger agentic + coding vs GLM-5.",
+    description: "Latest Z.AI flagship (2025). Strongest agentic + coding vs GLM-5.",
     capabilities: ["text_coding", "text_general", "tools", "structured", "long_context", "agentic", "cache"],
     callPatterns: ["sync", "streaming"],
     contextWindow: 200_000,
@@ -79,13 +96,15 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: 1.0,
     priceOutputPer1M: 3.2,
     implementationStatus: "implemented",
-    notes: "Primary DevMind model. Auto-selected for coding and agentic tasks.",
+    preferredLane: "anthropic",
+    supportedLanes: ["anthropic"],
+    notes: "Primary DevMind model. Auto-selected for coding and agentic tasks. Anthropic lane only.",
   },
 
   {
     modelId: "glm-5",
     displayName: "GLM-5",
-    description: "Z.AI flagship agentic model. Coding on par with Claude Opus 4.5. 200K context.",
+    description: "Z.AI flagship agentic model. 200K context. Verified on Anthropic lane.",
     capabilities: ["text_coding", "text_general", "tools", "structured", "long_context", "agentic", "cache"],
     callPatterns: ["sync", "streaming"],
     contextWindow: 200_000,
@@ -93,13 +112,15 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: 1.0,
     priceOutputPer1M: 3.2,
     implementationStatus: "implemented",
-    notes: "Fallback when GLM-5.1 is unavailable or rejected.",
+    preferredLane: "anthropic",
+    supportedLanes: ["anthropic"],
+    notes: "First fallback when GLM-5.1 is rejected. Anthropic lane only.",
   },
 
   {
     modelId: "glm-5-code",
     displayName: "GLM-5-Code",
-    description: "Code-specialized variant of GLM-5. Higher per-token cost.",
+    description: "Code-specialized variant of GLM-5.",
     capabilities: ["text_coding", "tools", "structured", "cache"],
     callPatterns: ["sync", "streaming"],
     contextWindow: 128_000,
@@ -107,13 +128,14 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: 1.2,
     priceOutputPer1M: 5.0,
     implementationStatus: "implemented",
-    notes: "Use when code-only specialization is preferred over general reasoning.",
+    preferredLane: "anthropic",
+    supportedLanes: ["anthropic"],
   },
 
   {
     modelId: "glm-5-turbo",
     displayName: "GLM-5-Turbo",
-    description: "Faster GLM-5 variant. Lower latency.",
+    description: "Faster GLM-5 variant.",
     capabilities: ["text_coding", "text_general", "tools", "structured", "long_context", "cache"],
     callPatterns: ["sync", "streaming"],
     contextWindow: 200_000,
@@ -121,12 +143,14 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: 1.2,
     priceOutputPer1M: 4.0,
     implementationStatus: "implemented",
+    preferredLane: "anthropic",
+    supportedLanes: ["anthropic"],
   },
 
   {
     modelId: "glm-4.7",
     displayName: "GLM-4.7",
-    description: "Balanced model. Lower cost than GLM-5 family.",
+    description: "Balanced mid-tier model. Verified working on Anthropic lane.",
     capabilities: ["text_coding", "text_general", "tools", "structured", "cache"],
     callPatterns: ["sync", "streaming"],
     contextWindow: 128_000,
@@ -134,12 +158,18 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: 0.6,
     priceOutputPer1M: 2.2,
     implementationStatus: "implemented",
+    preferredLane: "anthropic",
+    supportedLanes: ["anthropic"],
+    notes: "Mid-tier fallback. Anthropic lane only.",
   },
+
+  // ═══ Text / Coding models — PAAS lane (free tier) ══════════════════════════
+  // Verified: glm-4.7-flash works on /api/paas/v4/chat/completions
 
   {
     modelId: "glm-4.7-flash",
     displayName: "GLM-4.7-Flash",
-    description: "FREE model. Good for development/testing and low-stakes tasks.",
+    description: "FREE model. Verified working on PAAS lane. Good for dev/testing.",
     capabilities: ["text_coding", "text_general"],
     callPatterns: ["sync", "streaming"],
     contextWindow: 128_000,
@@ -147,13 +177,15 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: null,
     priceOutputPer1M: null,
     implementationStatus: "implemented",
-    notes: "Free tier. Recommended for local dev when cost matters.",
+    preferredLane: "paas",
+    supportedLanes: ["paas"],
+    notes: "Free tier. PAAS lane. Reliable last-resort fallback for text tasks.",
   },
 
   {
     modelId: "glm-4.5-flash",
     displayName: "GLM-4.5-Flash",
-    description: "FREE model. Older generation, suitable for simple tasks.",
+    description: "FREE model. Older generation, simple tasks.",
     capabilities: ["text_general"],
     callPatterns: ["sync", "streaming"],
     contextWindow: 128_000,
@@ -161,15 +193,17 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: null,
     priceOutputPer1M: null,
     implementationStatus: "implemented",
-    notes: "Free tier fallback.",
+    preferredLane: "paas",
+    supportedLanes: ["paas"],
+    notes: "Free tier fallback. PAAS lane.",
   },
 
-  // ═══ Vision models ═════════════════════════════════════════════════════════
+  // ═══ Vision models — PAAS lane ══════════════════════════════════════════════
 
   {
     modelId: "glm-4.6v",
     displayName: "GLM-4.6V",
-    description: "SOTA vision model. Accepts text + image input. 128K context.",
+    description: "SOTA vision model. Text + image input. 128K context.",
     capabilities: ["vision", "text_general", "tools", "structured", "cache"],
     callPatterns: ["sync", "streaming"],
     contextWindow: 128_000,
@@ -177,7 +211,9 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: 0.3,
     priceOutputPer1M: 0.9,
     implementationStatus: "implemented",
-    notes: "Auto-selected when messages contain image_url content.",
+    preferredLane: "paas",
+    supportedLanes: ["paas"],
+    notes: "Auto-selected when messages contain image_url content. PAAS lane.",
   },
 
   {
@@ -191,12 +227,12 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: null,
     priceOutputPer1M: null,
     implementationStatus: "implemented",
-    notes: "Free vision tier.",
+    preferredLane: "paas",
+    supportedLanes: ["paas"],
+    notes: "Free vision tier. PAAS lane.",
   },
 
-  // ═══ Image generation models ════════════════════════════════════════════════
-  // NOTE: These use POST /images/generations — a separate endpoint from
-  // /chat/completions. Not wired into the DevMind agent loop.
+  // ═══ Image generation — not wired ═══════════════════════════════════════════
 
   {
     modelId: "glm-image",
@@ -209,7 +245,9 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: null,
     priceOutputPer1M: null,
     implementationStatus: "provider_only",
-    notes: "Not wired. Needs dedicated /images/generations tool, not chat completions.",
+    preferredLane: "paas",
+    supportedLanes: ["paas"],
+    notes: "Not wired. Needs dedicated /images/generations endpoint.",
   },
 
   {
@@ -223,11 +261,12 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: null,
     priceOutputPer1M: null,
     implementationStatus: "provider_only",
+    preferredLane: "paas",
+    supportedLanes: ["paas"],
     notes: "Same constraints as GLM-Image.",
   },
 
-  // ═══ Video generation models ═════════════════════════════════════════════════
-  // NOTE: Require async polling — not wired in DevMind.
+  // ═══ Video generation — deferred ════════════════════════════════════════════
 
   {
     modelId: "cogvideox-3",
@@ -240,15 +279,17 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: null,
     priceOutputPer1M: null,
     implementationStatus: "deferred",
+    preferredLane: "paas",
+    supportedLanes: ["paas"],
     notes: "Async polling. Not wired in DevMind agent loop.",
   },
 
-  // ═══ Audio models ═════════════════════════════════════════════════════════
+  // ═══ Audio — deferred ════════════════════════════════════════════════════════
 
   {
     modelId: "glm-asr-2512",
     displayName: "GLM-ASR-2512",
-    description: "Speech-to-text (audio recognition).",
+    description: "Speech-to-text.",
     capabilities: ["audio_stt"],
     callPatterns: ["sync"],
     contextWindow: 0,
@@ -256,6 +297,8 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     priceInputPer1M: null,
     priceOutputPer1M: null,
     implementationStatus: "deferred",
+    preferredLane: "paas",
+    supportedLanes: ["paas"],
     notes: "Audio-specific endpoint. Not wired in DevMind.",
   },
 ];
@@ -277,74 +320,99 @@ export function getModelsForCapability(cap: ZaiCapabilityType): ZaiModelSpec[] {
 // ─── Model selection policy ──────────────────────────────────────────────────
 
 export type ModelSelectionHint =
-  | "agentic"       // Complex multi-step autonomous tasks (DevMind default)
-  | "coding"        // Code creation, editing, debugging
-  | "general"       // General text, light reasoning
-  | "vision"        // Message contains image content
-  | "conversational"; // Simple conversational prompt (cheap model ok)
+  | "agentic"
+  | "coding"
+  | "general"
+  | "vision"
+  | "conversational";
+
+export interface LaneCandidate {
+  modelId: string;
+  lane: ZaiLane;
+  reason: string;
+}
 
 /**
- * Select the best Z.AI model for the given task hint.
+ * Returns an ordered list of (model, lane) candidates for the given hint.
+ * The provider tries them in order, stopping at the first success.
  *
- * Priority:
- *   GLM-5.1 for coding/agentic (best current model)
- *   GLM-5   fallback for coding/agentic
- *   GLM-4.6V for vision
- *   GLM-4.7-Flash for conversational/general (free)
+ * Fallback logic:
+ *   agentic/coding  → glm-5.1(anthropic) → glm-5(anthropic) → glm-4.7(anthropic) → glm-4.7-flash(paas)
+ *   vision          → glm-4.6v(paas) → glm-4.6v-flash(paas)
+ *   conversational  → glm-4.7-flash(paas) → glm-4.5-flash(paas)
+ *   general         → glm-4.7-flash(paas) → glm-4.7(anthropic)
  *
- * Env override (ZAI_MODEL) takes precedence for debugging/pinning.
+ * Env override (ZAI_MODEL) pins to a single model/lane — no chain.
  */
-export function selectZaiModel(
+export function getFallbackChain(
   hint: ModelSelectionHint,
   envOverride?: string
-): { modelId: string; reason: string } {
+): LaneCandidate[] {
   if (envOverride) {
-    return {
-      modelId: envOverride,
-      reason: `env override: ZAI_MODEL=${envOverride} (clears automatic selection)`,
-    };
+    const spec = getModelById(envOverride);
+    const lane: ZaiLane = spec?.preferredLane ?? "paas";
+    return [{ modelId: envOverride, lane, reason: `env override: ZAI_MODEL=${envOverride}` }];
   }
 
   switch (hint) {
     case "agentic":
     case "coding":
-      return {
-        modelId: "glm-5.1",
-        reason: `hint="${hint}" → GLM-5.1 (latest flagship agentic, SOTA coding, 200K ctx)`,
-      };
+      return [
+        { modelId: "glm-5.1",      lane: "anthropic", reason: `hint="${hint}" → GLM-5.1 (Anthropic lane, flagship agentic)` },
+        { modelId: "glm-5",        lane: "anthropic", reason: `fallback #1 → GLM-5 (Anthropic lane)` },
+        { modelId: "glm-4.7",      lane: "anthropic", reason: `fallback #2 → GLM-4.7 (Anthropic lane)` },
+        { modelId: "glm-4.7-flash",lane: "paas",      reason: `fallback #3 → GLM-4.7-Flash (PAAS lane, free)` },
+      ];
 
     case "vision":
-      return {
-        modelId: "glm-4.6v",
-        reason: `hint="vision" → GLM-4.6V (SOTA multimodal, image+text input)`,
-      };
+      return [
+        { modelId: "glm-4.6v",       lane: "paas", reason: `hint="vision" → GLM-4.6V (PAAS lane, SOTA multimodal)` },
+        { modelId: "glm-4.6v-flash", lane: "paas", reason: `fallback → GLM-4.6V-Flash (PAAS lane, free vision)` },
+      ];
 
     case "conversational":
-    case "general":
-      return {
-        modelId: "glm-4.7-flash",
-        reason: `hint="${hint}" → GLM-4.7-Flash (free, fast, no heavy reasoning needed)`,
-      };
+      return [
+        { modelId: "glm-4.7-flash", lane: "paas",      reason: `hint="conversational" → GLM-4.7-Flash (PAAS lane, free, fast)` },
+        { modelId: "glm-4.5-flash", lane: "paas",      reason: `fallback → GLM-4.5-Flash (PAAS lane, free)` },
+      ];
 
+    case "general":
     default:
-      return {
-        modelId: "glm-5.1",
-        reason: `hint="${hint}" (unknown) → defaulting to GLM-5.1`,
-      };
+      return [
+        { modelId: "glm-4.7-flash", lane: "paas",      reason: `hint="${hint}" → GLM-4.7-Flash (PAAS lane, free)` },
+        { modelId: "glm-4.7",       lane: "anthropic",  reason: `fallback → GLM-4.7 (Anthropic lane)` },
+      ];
   }
 }
 
 /**
- * Log a human-readable capability summary. Call at startup for diagnostics.
+ * Select the single best model for the given hint (first in fallback chain).
+ * Env override (ZAI_MODEL) takes precedence.
+ * @deprecated Prefer getFallbackChain() for lane-aware routing with fallback.
+ */
+export function selectZaiModel(
+  hint: ModelSelectionHint,
+  envOverride?: string
+): { modelId: string; lane: ZaiLane; reason: string } {
+  const chain = getFallbackChain(hint, envOverride);
+  return chain[0];
+}
+
+/**
+ * Human-readable capability + lane summary. Used in startup diagnostics.
  */
 export function getCapabilitySummary(): string {
   const implemented = getImplementedModels();
   const providerOnly = ZAI_MODEL_REGISTRY.filter((m) => m.implementationStatus === "provider_only");
   const deferred = ZAI_MODEL_REGISTRY.filter((m) => m.implementationStatus === "deferred");
 
+  const paasModels = implemented.filter((m) => m.preferredLane === "paas").map((m) => m.modelId);
+  const anthropicModels = implemented.filter((m) => m.preferredLane === "anthropic").map((m) => m.modelId);
+
   return [
-    `Z.AI Capability Registry (${ZAI_MODEL_REGISTRY.length} models)`,
-    `  Implemented (${implemented.length}): ${implemented.map((m) => m.modelId).join(", ")}`,
+    `Z.AI Capability Registry (${ZAI_MODEL_REGISTRY.length} models, 2 lanes)`,
+    `  PAAS lane      (/api/paas/v4/)      : ${paasModels.join(", ")}`,
+    `  Anthropic lane (/api/anthropic/v1/) : ${anthropicModels.join(", ")}`,
     `  Provider-only / not wired (${providerOnly.length}): ${providerOnly.map((m) => m.modelId).join(", ")}`,
     `  Deferred (${deferred.length}): ${deferred.map((m) => m.modelId).join(", ")}`,
   ].join("\n");
