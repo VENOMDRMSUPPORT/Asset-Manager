@@ -1,0 +1,160 @@
+We are at the final closeout step for Phase 05.
+
+The core engineering work is now strong:
+- execution excellence
+- verification/repair behavior
+- project intelligence basics
+- historical persistence
+- product identity cleanup to VenomGPT
+
+However, the operator-facing UI layout still has not landed in the intended professional structure.
+
+This is the final bounded **Phase 05 UI/operator closeout pass**.
+
+## Important
+
+Do NOT do new backend feature expansion in this pass unless a tiny frontend-supporting adjustment is absolutely necessary.
+Do NOT start a new phase.
+Do NOT redesign the whole app.
+Do NOT add feature sprawl.
+
+The goal is to make the runtime/operator experience feel more like a professional execution console / asset manager, closer in spirit to Replit.
+
+---
+
+# What is still wrong
+
+The current UI still feels too much like a normal IDE with panels added on.
+
+Specifically:
+- the left side is still primarily just the file explorer, not an operator-facing execution console
+- the execution feed is present but not visually central enough
+- the right-side task area still feels like a standard task history panel rather than a strong task context / task management surface
+- post-completion summaries do not yet feel as polished and professional as intended
+
+---
+
+# Goal
+
+Finalize the UI so VenomGPT feels like a serious execution-oriented coding assistant, not just an IDE with task cards.
+
+---
+
+# Required layout direction
+
+## 1) Left side: operator-facing execution surface
+The left-side experience should feel more like an Asset Manager / execution console than a plain passive file list.
+
+This does NOT mean deleting the file explorer completely.
+It means the left-side experience should better communicate:
+
+- what the agent is doing
+- what files it touched
+- what stage it is in
+- what actions it completed
+- what the final result was
+
+The user should feel that someone is actively working, not that they are staring at a static file tree.
+
+Possible implementation direction:
+- preserve file explorer access
+- but give stronger visual/operator emphasis to execution feed and action grouping
+- improve grouping of execution steps and summaries
+- make the execution surface feel like a real working session
+
+## 2) Right side: professional task context panel
+The right-side panel should feel more intentional and professional.
+
+Requirements:
+- live-updating task list
+- clearer current task vs selected historical task
+- better summaries for completed tasks
+- stronger context for the selected task
+- if useful, show:
+  - files touched
+  - commands run
+  - verification result
+  - repair count
+- do not just duplicate the entire file explorer for looks
+
+The right side should act as a strong task context / task management surface.
+
+## 3) Execution Feed should become more central
+The current execution feed exists, but it still feels secondary.
+
+Improve it so that:
+- it is visually more central to the working experience
+- execution stages are easier to scan
+- grouped actions feel more professional
+- completion summaries are easier to trust
+- the user can understand “what happened” without hunting for it
+
+## 4) Better professional completion summaries
+When a task finishes, the summary should feel closer to a professional execution tool.
+
+Include clean, readable sections such as:
+- files changed
+- commands run
+- verification outcome
+- repair attempts if any
+- final result
+
+Do not make it verbose or fake.
+Do make it feel polished and grounded.
+
+## 5) Preserve what already works
+Do not regress:
+- task execution
+- verification
+- repair loop
+- task history persistence
+- task replay
+- VenomGPT naming
+- project intelligence
+- stage-aware feed
+- right-side task usability that already exists
+
+---
+
+# What this pass is NOT
+
+Do not:
+- turn this into a broad visual redesign
+- add unrelated product features
+- build a brand-new layout architecture unless necessary
+- undo the current working task/history/feed functionality
+- add fake narration
+
+This is a professional operator-facing layout correction and polish pass only.
+
+---
+
+# Verification required
+
+You must verify locally and report exact results for:
+
+1. execution feed feels more central and readable during a live task
+2. left-side/operator experience feels more like a real execution console
+3. right-side task area updates live and feels more professional
+4. completed task summaries are clearer and more trustworthy
+5. multiple tasks can still be reviewed from history
+6. no regressions in task execution, replay, persistence, or verification
+7. VenomGPT naming remains correct everywhere touched by this pass
+
+Include screenshots if useful.
+
+---
+
+# Final response format
+
+1. What I changed
+2. Why the previous UI still felt incomplete
+3. How the left-side/operator experience changed
+4. How the right-side task context changed
+5. How the execution feed/completion summary changed
+6. Files changed
+7. Verification performed
+8. Remaining risks / what is intentionally deferred
+
+Do not stop at analysis.
+Make the code changes, verify them, and report the real results.
