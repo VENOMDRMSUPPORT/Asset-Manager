@@ -31,7 +31,21 @@ export interface TaskFailureDetail {
   title: string;
   detail: string;
   step: string;
-  category: "model" | "tool" | "command" | "workspace" | "orchestration" | "cancelled";
+  category:
+    | "model"
+    | "missing_api_key"
+    | "invalid_api_key"
+    | "model_not_found"
+    | "insufficient_balance"
+    | "rate_limit"
+    | "network_error"
+    | "base_url_error"
+    | "context_length"
+    | "tool"
+    | "command"
+    | "workspace"
+    | "orchestration"
+    | "cancelled";
 }
 
 export interface AgentTask {
@@ -40,6 +54,7 @@ export interface AgentTask {
   status: TaskStatus;
   createdAt: Date;
   completedAt?: Date;
+  durationMs?: number;
   events: AgentEvent[];
   summary?: string;
   completion?: TaskCompletion;
@@ -97,6 +112,18 @@ export function listTasks(): AgentTask[] {
   );
 }
 
+export function deleteTask(taskId: string): boolean {
+  const task = tasks.get(taskId);
+  if (!task) return false;
+  // Cancel any running task before deleting
+  if (task.status === "running") {
+    cancelTask(taskId);
+  }
+  tasks.delete(taskId);
+  taskControllers.delete(taskId);
+  return true;
+}
+
 export function addEvent(
   taskId: string,
   type: AgentEventType,
@@ -124,15 +151,10 @@ export function updateTaskStatus(
   task.status = status;
   if (status === "done" || status === "error") {
     task.completedAt = new Date();
+    task.durationMs = task.completedAt.getTime() - task.createdAt.getTime();
     cleanupTaskController(taskId);
   }
-  if (summary !== undefined) {
-    task.summary = summary;
-  }
-  if (completion !== undefined) {
-    task.completion = completion;
-  }
-  if (failureDetail !== undefined) {
-    task.failureDetail = failureDetail;
-  }
+  if (summary !== undefined) task.summary = summary;
+  if (completion !== undefined) task.completion = completion;
+  if (failureDetail !== undefined) task.failureDetail = failureDetail;
 }

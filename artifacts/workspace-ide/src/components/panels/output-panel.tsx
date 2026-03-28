@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useIdeStore } from '@/store/use-ide-store';
 import {
   Terminal, Activity, CheckCircle2, AlertCircle, PlayCircle,
-  Eye, FileEdit, Settings, Trash2, FileCheck, GitBranch, ShieldAlert, Zap,
+  Eye, FileEdit, Settings, Trash2, FileCheck, GitBranch, ShieldAlert, Zap, Copy, Check,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -25,27 +25,56 @@ interface FailureData {
 
 export function OutputPanel() {
   const [activeTab, setActiveTab] = useState<TabType>('agent');
+  const [copied, setCopied] = useState(false);
   const { agentLogs, terminalOutput, clearTerminal } = useIdeStore();
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const agentEndRef = useRef<HTMLDivElement>(null);
+  const agentScrollRef = useRef<HTMLDivElement>(null);
+  const [userScrolled, setUserScrolled] = useState(false);
 
+  // Auto-scroll to bottom unless user has scrolled up
   useEffect(() => {
     if (activeTab === 'terminal') {
       terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    } else {
+    } else if (!userScrolled) {
       agentEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [terminalOutput.length, agentLogs.length, activeTab]);
+  }, [terminalOutput.length, agentLogs.length, activeTab, userScrolled]);
+
+  const handleAgentScroll = useCallback(() => {
+    const el = agentScrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    setUserScrolled(!atBottom);
+  }, []);
+
+  // Reset scroll lock when tab switches or logs cleared
+  useEffect(() => {
+    setUserScrolled(false);
+  }, [activeTab, agentLogs.length === 0]);
+
+  const handleCopyLogs = useCallback(async () => {
+    if (activeTab === 'agent') {
+      const text = agentLogs.map(l =>
+        `[${format(new Date(l.timestamp), 'HH:mm:ss')}] [${l.type.toUpperCase()}] ${l.message}`
+      ).join('\n');
+      await navigator.clipboard.writeText(text);
+    } else {
+      await navigator.clipboard.writeText(terminalOutput.join(''));
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }, [activeTab, agentLogs, terminalOutput]);
 
   const doneLog = agentLogs.findLast(l => l.type === 'done');
   const completionData: CompletionData | null = doneLog?.data ?? null;
 
-  // Find the last error event that has structured failure detail (category field)
   const lastErrorLog = agentLogs.findLast(l => l.type === 'error' && l.data?.category);
   const failureData: FailureData | null = (!doneLog && lastErrorLog?.data) ? lastErrorLog.data as FailureData : null;
 
   const commandCount = agentLogs.filter(l => l.type === 'command').length;
+  const hasContent = activeTab === 'agent' ? agentLogs.length > 0 : terminalOutput.length > 0;
 
   return (
     <div className="bg-panel border-r border-panel-border flex flex-col" style={{ gridArea: 'terminal' }}>
@@ -75,18 +104,37 @@ export function OutputPanel() {
           </button>
         </div>
 
-        {activeTab === 'terminal' && (
-          <button
-            onClick={clearTerminal}
-            className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-panel transition-colors"
-            title="Clear Terminal"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {hasContent && (
+            <button
+              onClick={handleCopyLogs}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-panel transition-colors"
+              title={`Copy ${activeTab === 'agent' ? 'agent logs' : 'terminal output'}`}
+            >
+              {copied
+                ? <Check className="w-3.5 h-3.5 text-green-500" />
+                : <Copy className="w-3.5 h-3.5" />
+              }
+              <span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+          )}
+          {activeTab === 'terminal' && (
+            <button
+              onClick={clearTerminal}
+              className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-panel transition-colors"
+              title="Clear Terminal"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-[#0a0a0c] p-4 font-mono text-sm relative">
+      <div
+        ref={agentScrollRef}
+        onScroll={activeTab === 'agent' ? handleAgentScroll : undefined}
+        className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-panel-border scrollbar-track-transparent bg-[#0a0a0c] p-4 font-mono text-sm"
+      >
         {activeTab === 'agent' && (
           <div className="space-y-3">
             {agentLogs.length === 0 ? (
@@ -105,6 +153,18 @@ export function OutputPanel() {
 
             {completionData && !failureData && (
               <CompletionCard data={completionData} />
+            )}
+
+            {userScrolled && agentLogs.length > 0 && (
+              <button
+                onClick={() => {
+                  setUserScrolled(false);
+                  agentEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="fixed bottom-6 left-1/3 text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-full shadow-lg hover:bg-primary/90 transition-colors z-10"
+              >
+                ↓ Jump to latest
+              </button>
             )}
 
             <div ref={agentEndRef} />
@@ -133,24 +193,21 @@ export function OutputPanel() {
 function AgentLogItem({ log }: { log: { type: string; message: string; timestamp: string; data?: Record<string, unknown> } }) {
   const getStyle = (type: string) => {
     switch (type) {
-      case 'status':      return { icon: PlayCircle,   color: 'text-blue-400',    bg: 'bg-blue-400/10',    border: 'border-blue-400/20' };
-      case 'thought':     return { icon: Settings,     color: 'text-amber-400',   bg: 'bg-amber-400/10',   border: 'border-amber-400/20' };
-      case 'file_read':   return { icon: Eye,          color: 'text-purple-400',  bg: 'bg-purple-400/10',  border: 'border-purple-400/20' };
-      case 'file_write':  return { icon: FileEdit,     color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' };
-      case 'command':     return { icon: Terminal,     color: 'text-cyan-400',    bg: 'bg-cyan-400/10',    border: 'border-cyan-400/20' };
-      case 'command_output': return { icon: Terminal,  color: 'text-gray-400',    bg: 'bg-gray-400/5',     border: 'border-gray-400/10' };
-      case 'error':       return { icon: AlertCircle,  color: 'text-red-400',     bg: 'bg-red-400/10',     border: 'border-red-400/20' };
-      case 'done':        return { icon: CheckCircle2, color: 'text-green-500',   bg: 'bg-green-500/10',   border: 'border-green-500/20' };
-      default:            return { icon: Activity,     color: 'text-gray-400',    bg: 'bg-gray-400/10',    border: 'border-gray-400/20' };
+      case 'status':         return { icon: PlayCircle,   color: 'text-blue-400',    bg: 'bg-blue-400/10',    border: 'border-blue-400/20' };
+      case 'thought':        return { icon: Settings,     color: 'text-amber-400',   bg: 'bg-amber-400/10',   border: 'border-amber-400/20' };
+      case 'file_read':      return { icon: Eye,          color: 'text-purple-400',  bg: 'bg-purple-400/10',  border: 'border-purple-400/20' };
+      case 'file_write':     return { icon: FileEdit,     color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' };
+      case 'command':        return { icon: Terminal,     color: 'text-cyan-400',    bg: 'bg-cyan-400/10',    border: 'border-cyan-400/20' };
+      case 'command_output': return { icon: Terminal,     color: 'text-gray-400',    bg: 'bg-gray-400/5',     border: 'border-gray-400/10' };
+      case 'error':          return { icon: AlertCircle,  color: 'text-red-400',     bg: 'bg-red-400/10',     border: 'border-red-400/20' };
+      case 'done':           return { icon: CheckCircle2, color: 'text-green-500',   bg: 'bg-green-500/10',   border: 'border-green-500/20' };
+      default:               return { icon: Activity,     color: 'text-gray-400',    bg: 'bg-gray-400/10',    border: 'border-gray-400/20' };
     }
   };
 
   const { icon: Icon, color, bg, border } = getStyle(log.type);
 
-  // The done event is rendered as CompletionCard below the list
-  if (log.type === 'done') {
-    return null;
-  }
+  if (log.type === 'done') return null;
 
   return (
     <div className={`flex gap-3 p-3 rounded-lg border ${bg} ${border}`}>

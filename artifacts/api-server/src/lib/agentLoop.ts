@@ -1,4 +1,5 @@
 import { getModelProvider, ModelError, type Message } from "./modelAdapter.js";
+import { normalizeModelResponse, buildRetryInstruction, type NormalizeFailureReason } from "./responseNormalizer.js";
 import { listDirectory, readFile, writeFile } from "./fileTools.js";
 import { runCommand } from "./terminal.js";
 import {
@@ -40,6 +41,20 @@ function failTask(
   updateTaskStatus(taskId, "error", summary, undefined, failure);
   broadcastTaskUpdate(task);
 }
+
+// ─── Conversational prompt detection ─────────────────────────────────────────
+// These prompts don't need the full agent loop. Handling them separately
+// prevents "no valid JSON action" failures on simple greetings.
+
+const CONVERSATIONAL_RE = /^(hi|hello|hey|thanks|thank you|thx|ty|ok|okay|cool|great|bye|goodbye|yes|no|yep|nope|yeah|sure|got it|sounds good|perfect|nice|alright|what|huh)[\s!.,?]*$/i;
+
+function isConversationalPrompt(prompt: string): boolean {
+  const t = prompt.trim();
+  if (t.length > 80) return false;
+  return CONVERSATIONAL_RE.test(t);
+}
+
+// ─── System prompt ────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are DevMind, an expert AI coding assistant that executes software engineering tasks autonomously on a local codebase.
 
@@ -113,7 +128,7 @@ const DEFAULT_COMMAND_TIMEOUT_S = 120;
 const MAX_COMMAND_TIMEOUT_S = 300;
 
 function pruneMessages(messages: Message[]): Message[] {
-  const total = messages.reduce((sum, m) => sum + m.content.length, 0);
+  const total = messages.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 500), 0);
   if (total <= MAX_CONTENT_CHARS) return messages;
 
   const system = messages[0];
@@ -123,28 +138,6 @@ function pruneMessages(messages: Message[]): Message[] {
 
   logger.warn({ before: rest.length, after: kept.length }, "Pruned message history to fit context window");
   return [system, ...kept];
-}
-
-function parseAction(text: string): Record<string, unknown> | null {
-  const cleaned = text.trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-
-  const candidate = cleaned.slice(start, end + 1);
-  try {
-    const parsed = JSON.parse(candidate);
-    if (typeof parsed === "object" && parsed !== null && typeof (parsed as Record<string, unknown>)["action"] === "string") {
-      return parsed as Record<string, unknown>;
-    }
-    return null;
-  } catch {
-    try {
-      const parsed = JSON.parse(cleaned);
-      if (typeof parsed === "object" && parsed !== null) return parsed as Record<string, unknown>;
-    } catch {}
-    return null;
-  }
 }
 
 function formatDirectoryTree(entries: Awaited<ReturnType<typeof listDirectory>>, indent = ""): string {
@@ -287,7 +280,7 @@ async function executeAction(
     }
 
     default: {
-      return { success: false, output: `Unknown action type: "${actionType}". Must be one of: think, list_dir, read_file, write_file, run_command, done.` };
+      return { success: false, output: `Unknown action type: "${actionType}". Valid actions: think, list_dir, read_file, write_file, run_command, done.` };
     }
   }
 }
@@ -304,6 +297,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
       updateTaskStatus(taskId, "running");
       logger.info({ taskId, prompt: prompt.slice(0, 100) }, "Agent task started");
 
+      // ── Workspace validation ──────────────────────────────────────────────
       const wsRoot = isWorkspaceSet() ? getWorkspaceRoot() : null;
       emit(taskId, "status", `Agent started. Workspace: ${wsRoot ?? "not configured"}`);
 
@@ -317,6 +311,61 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         return;
       }
 
+      // ── Handle conversational prompts directly (bypass agent loop) ────────
+      // Simple greetings like "hi", "thanks", "ok" don't need file/command tools.
+      // Route them through a single chat call and produce a clean completion.
+      if (isConversationalPrompt(prompt)) {
+        logger.info({ taskId, prompt }, "Conversational prompt detected — using direct response path");
+        emit(taskId, "status", "Conversational prompt — responding directly.");
+
+        let model;
+        try {
+          model = getModelProvider();
+        } catch (err) {
+          const isModelError = err instanceof ModelError;
+          failTask(taskId, task, `Model error: ${isModelError ? err.message : String(err)}`, {
+            title: isModelError ? err.message : "Failed to initialize AI model",
+            detail: isModelError ? `Category: ${err.category}\nTechnical: ${err.technical}` : String(err),
+            step: "model_initialization",
+            category: "model",
+          });
+          return;
+        }
+
+        try {
+          let reply = "";
+          await model.chat(
+            [
+              { role: "system", content: "You are DevMind, a friendly AI coding assistant. Reply briefly and naturally." },
+              { role: "user", content: prompt },
+            ],
+            { maxTokens: 200, taskHint: "conversational" }
+          ).then((r) => { reply = r.content; });
+
+          emit(taskId, "thought", reply);
+          const completion: TaskCompletion = {
+            summary: reply,
+            changed_files: [],
+            commands_run: [],
+            final_status: "complete",
+            remaining: "",
+          };
+          emit(taskId, "done", reply, { changed_files: [], commands_run: [], final_status: "complete", remaining: "" });
+          updateTaskStatus(taskId, "done", reply, completion);
+          broadcastTaskUpdate(task);
+        } catch (err) {
+          const isModelError = err instanceof ModelError;
+          failTask(taskId, task, `Model call failed: ${isModelError ? err.message : String(err)}`, {
+            title: isModelError ? err.message : "AI model call failed",
+            detail: isModelError ? `Category: ${err.category}\nTechnical: ${err.technical}` : String(err),
+            step: "conversational_call",
+            category: "model",
+          });
+        }
+        return;
+      }
+
+      // ── Workspace snapshot ────────────────────────────────────────────────
       let workspaceSnapshot = "";
       try {
         const entries = await listDirectory("");
@@ -328,6 +377,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         logger.warn({ taskId, err }, "Could not snapshot workspace — continuing anyway");
       }
 
+      // ── Model initialization ──────────────────────────────────────────────
       let model;
       try {
         model = getModelProvider();
@@ -345,6 +395,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         return;
       }
 
+      // ── Agent loop ────────────────────────────────────────────────────────
       const messages: Message[] = [
         { role: "system", content: SYSTEM_PROMPT },
         {
@@ -377,12 +428,13 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         logger.debug({ taskId, step, maxSteps: MAX_STEPS }, "Agent step");
         emit(taskId, "status", `Step ${step}/${MAX_STEPS}`);
 
+        // ── Model call ──────────────────────────────────────────────────────
         let responseText = "";
         try {
           await model.chatStream(
             pruneMessages(messages),
             (chunk) => { responseText += chunk; },
-            { maxTokens: 4096, temperature: 0.1 }
+            { maxTokens: 4096, temperature: 0.1, taskHint: "agentic" }
           );
           logger.debug({ taskId, step, responseLength: responseText.length }, "Model response received");
         } catch (err) {
@@ -412,34 +464,51 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
 
         messages.push({ role: "assistant", content: responseText });
 
-        const action = parseAction(responseText);
-        if (!action) {
+        // ── Response normalization + parse ──────────────────────────────────
+        const normalized = normalizeModelResponse(responseText);
+
+        if (!normalized.ok) {
           consecutiveParseFailures++;
-          logger.warn({ taskId, step, consecutiveParseFailures, responsePreview: responseText.slice(0, 200) }, "Failed to parse JSON action from model");
-          const failMsg = `Could not parse a valid JSON action from the model response (attempt ${consecutiveParseFailures}/${MAX_CONSECUTIVE_PARSE_FAILURES}).\n\nResponse preview:\n${responseText.slice(0, 300)}`;
+          const reason: NormalizeFailureReason = normalized.reason;
+          const detail = normalized.detail;
+
+          logger.warn(
+            { taskId, step, consecutiveParseFailures, reason, responsePreview: responseText.slice(0, 200) },
+            `Normalize failed [${reason}]`
+          );
+
+          const failMsg = `Response normalization failed [${reason}] (attempt ${consecutiveParseFailures}/${MAX_CONSECUTIVE_PARSE_FAILURES}).\n${detail}`;
           emit(taskId, "error", failMsg);
 
           if (consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
-            failTask(taskId, task, `Model failed to produce valid JSON ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row`, {
-              title: "Model returned invalid responses repeatedly",
-              detail: `The model failed to output valid JSON ${MAX_CONSECUTIVE_PARSE_FAILURES} consecutive times. Last response preview:\n${responseText.slice(0, 500)}`,
+            failTask(taskId, task, `Model returned ${MAX_CONSECUTIVE_PARSE_FAILURES} unparseable responses in a row`, {
+              title: `Model failed to produce valid JSON ${MAX_CONSECUTIVE_PARSE_FAILURES} times`,
+              detail: `Last failure reason: ${reason}\n${detail}`,
               step: `step_${step}_parse`,
               category: "orchestration",
             });
             return;
           }
 
-          messages.push({
-            role: "user",
-            content: `ERROR: Your last response was not valid JSON. You MUST output exactly one JSON object with an "action" field. Nothing else. Example:\n{"action":"think","thought":"I need to re-analyze the task."}`,
-          });
+          const retryMsg = buildRetryInstruction(reason, responseText.slice(0, 300));
+          messages.push({ role: "user", content: retryMsg });
           continue;
         }
 
+        // ── Normalization succeeded ─────────────────────────────────────────
         consecutiveParseFailures = 0;
+
+        const { action, method, warning } = normalized;
+        if (method !== "direct_parse") {
+          logger.debug({ taskId, step, method, warning }, `Response normalized via ${method}`);
+        }
+        if (warning) {
+          logger.warn({ taskId, step, method, warning }, "Normalization warning");
+        }
 
         const actionType = String(action["action"] ?? "");
 
+        // ── Done action ─────────────────────────────────────────────────────
         if (actionType === "done") {
           const summary = String(action["summary"] ?? "Task complete.");
           const changedFiles = Array.isArray(action["changed_files"])
@@ -466,6 +535,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
           break;
         }
 
+        // ── Execute action ──────────────────────────────────────────────────
         const signal = getTaskSignal(taskId);
         logger.debug({ taskId, step, actionType }, "Executing action");
         const result = await executeAction(action, taskId, signal);

@@ -1,0 +1,513 @@
+# Replit Prompt — VenomGPT Z.AI Hardening + Testing UI Pass (Final)
+
+## Context
+
+This project is **VenomGPT**.
+
+It is a **real local-first AI coding assistant MVP**, not a mockup.
+
+Current confirmed working areas:
+- local Ubuntu bring-up works
+- frontend/backend startup works
+- workspace selection works
+- file creation/modification tasks work
+- task history basically exists
+- command execution path works in validated cases
+- Z.AI is the current primary provider path
+- the assistant can complete real local file and command tasks
+
+Current priority:
+- **validation and controlled hardening**
+- **not broad feature expansion**
+- **not architecture redesign**
+- **not product polish for its own sake**
+
+## What actually happened
+
+We validated the system locally and found a very specific problem class:
+
+- the model sometimes returns **multiple JSON objects in one response**
+- the model sometimes mixes:
+  - `think`
+  - executable actions
+  - `done`
+- the current parsing / response-contract handling is too brittle
+- this causes false failures such as:
+  - “model returned invalid responses repeatedly”
+- this can happen even on simple prompts like `hi`
+
+At the same time, local validation also proved the core system is **not fundamentally broken**:
+- single file tasks succeed
+- multi-step file tasks succeed
+- command execution succeeds
+- verification succeeds
+
+So this is **not** a rewrite request.
+
+This is a **focused hardening pass** for:
+1. the boundary between model output and action execution
+2. Z.AI provider architecture and model-selection policy
+3. a small local testing UI usability pass that is necessary for efficient validation
+
+## Strategic direction
+
+Z.AI should not remain narrowly wired around one fixed hardcoded model string in `.env`.
+
+We want the backend to:
+- select models automatically and quickly
+- support the broader Z.AI family cleanly
+- stay ready for future multi-provider expansion
+- expose honest capability boundaries
+- log what model was chosen and why
+
+Also, the local testing UI currently slows down validation.  
+We need a **small but practical usability pass** so repeated testing and debugging are not painful.
+
+## Important note about GLM-5.1
+
+Z.AI has released **GLM-5.1** and it must be accounted for in the provider model policy.
+
+Requirements:
+- include **GLM-5.1** explicitly in the provider capability / model policy layer
+- do **not** hardcode it as the only permanent default
+- make the policy capable of preferring GLM-5.1 for more complex agentic / hard tasks when appropriate
+- preserve the ability to use other suitable Z.AI models for lighter, cheaper, or more specialized tasks
+- keep the logic explicit and debuggable
+
+## Job
+
+Audit and implement a focused hardening pass for:
+
+1. agent output parsing and recovery
+2. non-task / conversational prompt handling
+3. Z.AI provider naming and abstraction cleanup
+4. automatic backend model selection
+5. broader Z.AI capability mapping
+6. provider error classification
+7. a practical local testing UI usability pass
+
+Do not stop at analysis.  
+Make the code changes, verify them locally, and report real results.
+
+## What this pass is NOT
+
+Do **not** do any of the following unless absolutely required to complete this pass:
+
+- do not redesign the whole architecture
+- do not replace the agent loop with a new framework
+- do not do broad feature expansion unrelated to this pass
+- do not fully ship image/video/audio product features end-to-end
+- do not add fake support for capabilities that are not really wired
+- do not do cosmetic UI work that is unrelated to testing usability
+- do not leave TODOs instead of implementing fixes
+
+---
+
+# Required outcomes
+
+## 1) Add a response normalization layer before final parse/validation
+
+The system must become more tolerant of common real-world model outputs, including cases such as:
+
+- a single valid JSON object
+- multiple JSON objects separated by newlines
+- JSON wrapped in code fences
+- a valid action plus extra explanatory text
+- `think` followed by a valid executable action
+- `think` followed by `done`
+- trailing prose after an otherwise valid action object
+
+Normalization must be conservative and safe.
+
+Rules:
+- do not silently invent actions
+- do not guess destructively
+- do recover from common formatting noise when recovery is unambiguous
+- do preserve honest failure when recovery is not safe
+
+## 2) Add explicit repair / retry behavior for imperfect structured output
+
+The system must **not fail immediately** on imperfect model output.
+
+Implement a clear recovery policy such as:
+- normalize first
+- attempt safe extraction
+- validate extracted candidate actions
+- retry with a stricter response instruction when needed
+- optionally reuse safely extracted valid action content when unambiguous
+- only declare failure after recovery attempts are exhausted
+
+Important:
+- do not create fake actions
+- do not hide ambiguity
+- do not claim success when the model output still cannot be trusted
+
+A guiding rule for this pass:
+
+> The system must not fail immediately on imperfect model output.  
+> It must attempt normalization, extraction, and safe recovery before declaring failure.
+
+## 3) Improve action parsing and validation
+
+After normalization, validate actions with a clear contract.
+
+The parser must:
+- distinguish malformed JSON from multiple-object output
+- distinguish unsupported action types from formatting failures
+- distinguish conversational / non-task output from action output
+- surface specific failure reasons in logs
+- avoid collapsing unrelated failures into one vague “invalid response” bucket
+
+## 4) Handle non-execution prompts correctly
+
+Simple conversational prompts like:
+- hi
+- hello
+- thanks
+- ok
+
+must not trigger brittle agent failures.
+
+Implement a clean policy for prompts that do not require file operations or command execution.
+
+Valid approaches include:
+- bypassing agent execution for clearly non-execution prompts
+- or allowing clean `done`-only completion in the agent loop
+
+Choose the least disruptive architecture-consistent solution.
+
+## 5) Refactor provider naming and provider boundaries
+
+The Z.AI integration must have a clear provider identity and naming convention now, before more providers are added later.
+
+Requirements:
+- use a clear provider name consistently in code, config, logs, and diagnostics
+- avoid vague naming that will become confusing in multi-provider phases
+- keep provider-specific concerns isolated from generic orchestration logic
+- keep provider diagnostics explicit and readable
+
+## 6) Replace hardcoded model dependence with automatic fast backend model selection
+
+Do not keep the system tightly coupled to one hardcoded main coding model in `.env`.
+
+We want **fast automatic model selection in the backend**.
+
+Requirements:
+- remove the need to hardcode the main coding model in `.env`
+- keep override ability for debugging, emergency pinning, or experiments
+- implement model selection policy that quickly chooses an appropriate Z.AI model based on task type / capability need
+- log the selected model and the reason for selection
+- preserve safe fallback behavior if a preferred model is unavailable or unsupported
+
+The goal is:
+- the user should not need to manually update `.env` every time Z.AI releases a stronger model
+- the backend should make a good default decision automatically
+
+## 7) Support the broader Z.AI family at the provider layer
+
+The provider layer must stop being artificially narrow.
+
+Refactor it so it can represent and route cleanly across Z.AI capability categories such as:
+- coding / language models
+- vision models
+- image models
+- video models
+- audio models
+- tool-capable APIs
+- agent-related APIs
+
+Important:
+- this does **not** require fully productizing all of these right now
+- it **does** require a future-ready provider/capability structure now
+- unsupported capabilities must fail honestly and clearly
+
+## 8) Build a provider capability registry or equivalent mapping
+
+Implement a clean internal structure that makes it easy to answer:
+- which Z.AI capabilities exist
+- which model/API supports which capability
+- which calls are synchronous vs asynchronous
+- which capabilities are implemented now vs deferred
+- which route should be used for text, vision, image, video, audio, tools, or agents
+
+This can be a registry, manifest, mapping, policy object, or similar architecture-consistent mechanism.
+
+It must be easy to extend later.
+
+## 9) Prepare clean extension points for Z.AI tools and agents
+
+Z.AI exposes more than plain chat completion.
+
+Prepare the code structure so future phases can integrate things such as:
+- web search
+- tool streaming output
+- function calling
+- structured output
+- agent APIs
+
+Do not overbuild.
+Do not ship fake support.
+But do refactor the provider layer so these are first-class extension points rather than hacks later.
+
+## 10) Improve Z.AI error handling using provider semantics
+
+Audit current Z.AI API error handling and improve it.
+
+Requirements:
+- classify HTTP-level failures separately from business error code failures
+- surface useful user-safe failure summaries
+- keep detailed provider diagnostics in logs
+- handle rate limiting, auth/config problems, unsupported model or method, quota / balance issues, provider unavailable, and similar failures more explicitly
+- avoid generic “internal error” messaging when a clearer classification is possible
+
+## 11) Make a focused usability pass on the local testing UI
+
+This phase is still primarily a backend/agent hardening pass, but a **small, targeted UI usability pass is required** because the current testing workflow is unnecessarily painful.
+
+This is **not** a redesign request.  
+It is a **practical testing UX pass** so the product can be validated properly.
+
+### A) Right-side assistant panel layout
+Rework the right-side assistant/testing panel so it is more usable during live testing.
+
+Target direction:
+- move the task input composer to the **bottom-right**
+- place task execution details / live activity **above** the composer
+- make the layout feel closer to the practical workflow style of Replit’s testing surface
+- preserve the current architecture; do not turn this into a full product redesign
+
+### B) Live execution activity panel
+The live activity / event log area must become actually usable.
+
+Requirements:
+- show execution events with more detail
+- add a visible scrollbar
+- support auto-scroll to latest event while task is running
+- allow the user to review older events without the panel feeling broken
+- add a one-click **Copy Logs** or **Copy Events** action for debugging
+
+### C) Task history usability
+The task history list is currently too limited.
+
+Requirements:
+- allow opening a previous task and reviewing the events/logs that happened during that task
+- show the full execution duration after task completion
+- add task management actions such as:
+  - delete
+  - archive
+- keep the UI honest about task status and completion state
+
+### D) Stop / cancel behavior
+The stop/cancel button must work reliably.
+
+Requirements:
+- audit the current cancel flow end-to-end
+- fix cases where stop/cancel appears available but does not actually stop the task
+- reflect cancellation state clearly in UI and history
+
+### E) Workspace switching usability
+The product needs basic workspace switching support for testing.
+
+Requirements:
+- make it easy to choose between more than one workspace
+- support switching the active workspace without awkward manual friction
+- keep workspace boundaries safe
+- do not weaken existing workspace safety checks
+
+### F) Preserve developer usability
+The UI should stay simple and local-dev friendly.
+
+Do not overdesign it.  
+Do not add product fluff.  
+Do add the minimal interaction quality needed for repeated validation sessions.
+
+## 12) Preserve working behavior
+
+Do not regress:
+- file create/update tasks
+- command execution path
+- local Ubuntu development flow
+- current local browser-based workflow
+- workspace safety
+- task history integrity
+- honest failure reporting
+- current Z.AI primary-provider path
+
+---
+
+# Implementation requirements
+
+- inspect the current agent loop, parse path, prompt shaping, provider abstraction, Z.AI integration, and model-response handling code
+- make real code changes
+- keep changes architecture-consistent
+- prefer focused internal hardening over flashy redesign
+- add helper utilities where needed for normalization, parsing, model selection, capability mapping, and error classification
+- keep the system safe: no destructive recovery behavior
+- keep workspace/file safety intact
+- preserve honest failure reporting
+
+## Specific architecture expectations
+
+### A) Clear separation between:
+- provider identity
+- capability registry
+- model selection policy
+- API call adapters
+- agent loop orchestration
+- UI state / task-history display logic
+
+### B) Honest partial support
+If some Z.AI capability is not yet wired end-to-end, represent it honestly as:
+- supported by provider
+- not yet implemented in product flow
+
+Do not pretend it is fully working if it is not.
+
+### C) Automatic model policy
+Implement a model policy layer that can quickly choose among Z.AI options based on capability need, such as:
+- normal coding task
+- long-horizon agentic task
+- conversational / no-op prompt
+- vision task
+- structured-output-sensitive task
+- function-calling / tool-heavy task
+- future image/video/audio task categories
+
+---
+
+# Verification requirements
+
+You must verify the implementation locally with real runs.
+
+At minimum, test these cases and report exact observed behavior.
+
+## Test A — conversational input
+Prompt:
+`hi`
+
+Expected:
+- no parse-loop meltdown
+- no repeated invalid JSON failure
+- graceful completion behavior
+
+## Test B — single file task
+Prompt:
+Create a file named app.js with:
+`console.log("VENOM AI ASSISTANT local test successful");`
+
+Expected:
+- file created successfully
+- clean completion
+
+## Test C — multi-step file task
+Prompt:
+Create app.js, then append a second console.log line.
+
+Expected:
+- both steps succeed
+- no parse failure
+- correct file contents
+
+## Test D — command execution task
+Prompt:
+Create app.js, run `node app.js`, and verify expected output.
+
+Expected:
+- file created
+- command executed
+- output verified
+- task completes successfully
+
+## Test E — messy output resilience
+Create or simulate a case where the model returns multiple JSON objects or mixed `think` + action style output.
+
+Expected:
+- normalization / recovery works when safe
+- or failure is classified precisely if recovery is not safe
+
+## Test F — automatic model selection
+Verify that the system no longer depends on one brittle hardcoded main coding model entry in `.env`.
+
+Expected:
+- model choice is automatic by default
+- override remains possible for debugging
+- diagnostics remain visible
+- current working provider path still works
+
+## Test G — provider capability visibility
+Verify that the code now has a clear capability mapping for Z.AI categories.
+
+Expected visibility for:
+- language / coding
+- vision
+- image
+- video
+- audio
+- tools
+- agents
+
+These must be represented clearly in provider capability code, even if not all are fully productized yet.
+
+## Test H — Z.AI error classification
+Force or simulate at least a few provider failure classes and show how they are surfaced.
+
+Examples:
+- auth/config failure
+- unsupported model or method
+- rate-limit handling
+- insufficient balance / quota style handling
+- provider unavailable / temporary traffic issue
+
+## Test I — live event panel usability
+Expected:
+- live events visible with scrolling
+- auto-scroll works during execution
+- old events remain reviewable
+- logs/events can be copied with one click
+
+## Test J — task history inspection
+Expected:
+- previous tasks can be opened
+- their execution details can be reviewed
+- delete/archive actions work safely
+- execution duration is visible after completion
+
+## Test K — cancel behavior
+Expected:
+- stop/cancel actually interrupts an in-progress task when possible
+- final task state is reflected honestly in UI/history
+
+## Test L — workspace switching
+Expected:
+- multiple workspaces can be selected/switched cleanly
+- no workspace safety regression occurs
+
+---
+
+# Final response format
+
+When done, respond in this exact structure:
+
+1. **What I changed**
+2. **Why the bug happened**
+3. **How parsing / normalization / repair now work**
+4. **How non-task prompts are handled now**
+5. **How Z.AI provider naming and capability mapping work now**
+6. **How automatic model selection works now**
+7. **How Z.AI error handling works now**
+8. **How the testing UI changed**
+9. **Files changed**
+10. **Verification performed**
+11. **Remaining risks / not yet solved**
+
+---
+
+# Critical instruction
+
+Do not stop at analysis.
+
+Do not only describe the problem.
+
+Do not leave this as a plan.
+
+**Make the code changes, run the verification, and report the real results.**

@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { logger } from "./logger.js";
+import { selectZaiModel, getCapabilitySummary, type ModelSelectionHint } from "./zaiCapabilities.js";
 
 export interface Message {
   role: "system" | "user" | "assistant";
@@ -26,14 +27,16 @@ export interface ModelProvider {
   ): Promise<ModelResponse>;
 }
 
-export type TaskHint = "coding" | "vision" | "general";
+export type { ModelSelectionHint };
 
 export interface ChatOptions {
   maxTokens?: number;
   temperature?: number;
   model?: string;
-  taskHint?: TaskHint;
+  taskHint?: ModelSelectionHint;
 }
+
+// ─── Error categories ────────────────────────────────────────────────────────
 
 export type ModelErrorCategory =
   | "missing_api_key"
@@ -59,29 +62,7 @@ export class ModelError extends Error {
   }
 }
 
-// ─── Z.AI Official Model Names (from docs.z.ai/guides/overview/pricing) ──────
-// Base URL: https://api.z.ai/api/paas/v4/
-// OpenAI SDK compatible at that base URL.
-//
-// Text / Coding models:
-//   glm-5           – flagship agentic/coding (200K ctx, SOTA coding vs Claude Opus 4.5) — DEFAULT
-//   glm-5-turbo     – faster variant of GLM-5
-//   glm-5-code      – code-specialist
-//   glm-4.7         – balanced, lower cost
-//   glm-4.7-flash   – FREE, good for testing
-//   glm-4.5-flash   – FREE
-//
-// Vision models (text + image input):
-//   glm-4.6v        – multimodal, 128K ctx, SOTA vision — DEFAULT VISION
-//   glm-4.6v-flash  – FREE vision
-//
-// Image generation (NOT wired in this app — POST /images/generations):
-//   glm-image, cogview-4
-// ─────────────────────────────────────────────────────────────────────────────
-
-const ZAI_BASE_URL_DEFAULT = "https://api.z.ai/api/paas/v4/";
-const ZAI_MODEL_CODING_DEFAULT = "glm-5";
-const ZAI_MODEL_VISION_DEFAULT = "glm-4.6v";
+// ─── Error categorization ────────────────────────────────────────────────────
 
 function categorizeError(err: unknown): ModelError {
   const msg = err instanceof Error ? err.message : String(err);
@@ -96,12 +77,12 @@ function categorizeError(err: unknown): ModelError {
   }
   if (status === 404 || /model not found|no such model/i.test(msg)) {
     return new ModelError(
-      "Model not found — the model name does not exist on this provider. Check ZAI_MODEL in your .env.",
+      "Model not found — the requested model does not exist on Z.AI. Check ZAI_MODEL in .env or the model auto-selection policy.",
       "model_not_found",
       msg
     );
   }
-  // ZAI returns 429 for BOTH rate-limit AND insufficient balance.
+  // Z.AI returns 429 for BOTH rate-limit AND insufficient balance.
   // Distinguish by message content.
   if (status === 429) {
     if (/balance|credit|quota|resource package|insufficient/i.test(msg)) {
@@ -133,14 +114,14 @@ function categorizeError(err: unknown): ModelError {
   }
   if (/econnrefused|network|timeout|fetch failed|socket/i.test(msg)) {
     return new ModelError(
-      "Cannot reach AI provider — check your network connection and the ZAI_BASE_URL in your .env.",
+      "Cannot reach Z.AI — check your network and the ZAI_BASE_URL in your .env.",
       "network_error",
       msg
     );
   }
   if (/base_url|baseurl|invalid url/i.test(msg)) {
     return new ModelError(
-      "Invalid base URL — check that ZAI_BASE_URL is a valid HTTPS endpoint.",
+      "Invalid base URL — check that ZAI_BASE_URL is a valid HTTPS endpoint (must be https://api.z.ai/api/paas/v4/).",
       "base_url_error",
       msg
     );
@@ -153,11 +134,16 @@ function categorizeError(err: unknown): ModelError {
   );
 }
 
+// ─── Official Z.AI constants ─────────────────────────────────────────────────
+
+const ZAI_BASE_URL_DEFAULT = "https://api.z.ai/api/paas/v4/";
+
 // ─── Provider resolution ──────────────────────────────────────────────────────
+//
 // Priority:
-//   1. ZAI (z.ai) — primary for ALL local usage. Used whenever ZAI_API_KEY is set.
-//   2. Replit AI Integration — only when ZAI_API_KEY is absent AND Replit integration
-//      vars are present (i.e., running inside Replit without a ZAI key configured).
+//   1. ZAI (z.ai) — PRIMARY for all local usage when ZAI_API_KEY is set.
+//   2. Replit AI Integration — FALLBACK only when ZAI_API_KEY is absent
+//      and Replit integration env vars are present.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type ProviderName = "zai" | "replit-openai";
@@ -166,8 +152,8 @@ interface ProviderConfig {
   name: ProviderName;
   apiKey: string;
   baseURL: string;
-  defaultCodingModel: string;
-  defaultVisionModel: string;
+  envModelOverride?: string;      // ZAI_MODEL env var (for override/pinning)
+  envVisionModelOverride?: string; // ZAI_VISION_MODEL env var
   supportsTemperature: boolean;
   routingReason: string;
 }
@@ -176,31 +162,26 @@ function resolveProviderConfig(): ProviderConfig {
   // 1. ZAI — primary
   const zaiApiKey = process.env["ZAI_API_KEY"];
   if (zaiApiKey) {
-    const baseURL = process.env["ZAI_BASE_URL"] || ZAI_BASE_URL_DEFAULT;
-    const codingModel = process.env["ZAI_MODEL"] || ZAI_MODEL_CODING_DEFAULT;
-    const visionModel = process.env["ZAI_VISION_MODEL"] || ZAI_MODEL_VISION_DEFAULT;
     return {
       name: "zai",
       apiKey: zaiApiKey,
-      baseURL,
-      defaultCodingModel: codingModel,
-      defaultVisionModel: visionModel,
+      baseURL: process.env["ZAI_BASE_URL"] || ZAI_BASE_URL_DEFAULT,
+      envModelOverride: process.env["ZAI_MODEL"] || undefined,
+      envVisionModelOverride: process.env["ZAI_VISION_MODEL"] || undefined,
       supportsTemperature: true,
       routingReason: "ZAI_API_KEY is set — using Z.AI as primary provider",
     };
   }
 
-  // 2. Replit integration — fallback when in Replit without ZAI key
+  // 2. Replit integration — fallback when no ZAI key
   const replitApiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
   const replitBaseURL = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
   if (replitApiKey && replitBaseURL) {
-    const model = process.env["ZAI_MODEL"] || "gpt-5.2";
     return {
       name: "replit-openai",
       apiKey: replitApiKey,
       baseURL: replitBaseURL,
-      defaultCodingModel: model,
-      defaultVisionModel: model,
+      envModelOverride: process.env["ZAI_MODEL"] || "gpt-5.2",
       supportsTemperature: false,
       routingReason: "No ZAI_API_KEY — falling back to Replit AI integration (gpt-5.2)",
     };
@@ -219,53 +200,53 @@ function resolveProviderConfig(): ProviderConfig {
 }
 
 // ─── Capability-based model routing ──────────────────────────────────────────
-// Automatically selects the right model for a given task without user input.
-// Text/coding → default coding model (glm-5)
-// Vision      → vision-capable model (glm-4.6v) when image content detected
-// Image gen   → NOT supported yet (documented below)
-// ─────────────────────────────────────────────────────────────────────────────
 
-function detectTaskHint(messages: Message[]): TaskHint {
+function detectVisionFromMessages(messages: Message[]): boolean {
   for (const msg of messages) {
     if (Array.isArray(msg.content)) {
       for (const part of msg.content) {
-        if (part.type === "image_url") return "vision";
+        if (part.type === "image_url") return true;
       }
     }
   }
-  return "coding";
+  return false;
 }
 
-function routeModel(
+function resolveModel(
   messages: Message[],
   options: ChatOptions,
   config: ProviderConfig
 ): { model: string; routingReason: string } {
+  // Explicit override in call options takes highest priority
   if (options.model) {
-    return { model: options.model, routingReason: `explicit override: ${options.model}` };
+    return { model: options.model, routingReason: `explicit call-time override: ${options.model}` };
   }
 
-  const hint = options.taskHint ?? detectTaskHint(messages);
+  // For Replit integration — use its fixed model
+  if (config.name === "replit-openai") {
+    const model = config.envModelOverride || "gpt-5.2";
+    return { model, routingReason: `Replit integration: ${model}` };
+  }
 
-  if (hint === "vision") {
+  // For Z.AI — auto-select via capability registry
+  // Detect vision from message content
+  const hint: ModelSelectionHint = detectVisionFromMessages(messages)
+    ? "vision"
+    : (options.taskHint ?? "agentic");
+
+  // Vision override via env takes priority over auto-selection
+  if (hint === "vision" && config.envVisionModelOverride) {
     return {
-      model: config.defaultVisionModel,
-      routingReason: `vision task detected → ${config.defaultVisionModel}`,
+      model: config.envVisionModelOverride,
+      routingReason: `vision task + env override: ZAI_VISION_MODEL=${config.envVisionModelOverride}`,
     };
   }
 
-  return {
-    model: config.defaultCodingModel,
-    routingReason: `coding/text task → ${config.defaultCodingModel}`,
-  };
+  const selected = selectZaiModel(hint, config.envModelOverride);
+  return { model: selected.modelId, routingReason: selected.reason };
 }
 
-// ─── NOTE: Image Generation ───────────────────────────────────────────────────
-// Z.AI supports image generation via GLM-Image and CogView-4 at POST /images/generations.
-// This is NOT wired into the current agent loop. The agent only uses chat completions.
-// To add image generation: create a separate tool in fileTools.ts that calls
-// /images/generations and saves the result to a file in the workspace.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── OpenAI-compatible provider ───────────────────────────────────────────────
 
 class OpenAICompatibleProvider implements ModelProvider {
   private client: OpenAI;
@@ -275,13 +256,12 @@ class OpenAICompatibleProvider implements ModelProvider {
     const config = resolveProviderConfig();
     this.config = config;
 
-    // Startup diagnostic — log provider selection at INFO level
     logger.info(
       {
         provider: config.name,
         baseURL: config.baseURL,
-        codingModel: config.defaultCodingModel,
-        visionModel: config.defaultVisionModel,
+        envModelOverride: config.envModelOverride ?? "(none — auto selection active)",
+        supportsTemperature: config.supportsTemperature,
         routingReason: config.routingReason,
       },
       `[DevMind] Provider selected: ${config.name}`
@@ -305,8 +285,8 @@ class OpenAICompatibleProvider implements ModelProvider {
   }
 
   async chat(messages: Message[], options: ChatOptions = {}): Promise<ModelResponse> {
-    const { model, routingReason } = routeModel(messages, options, this.config);
-    logger.debug({ model, routingReason, provider: this.config.name }, "Model routed for chat");
+    const { model, routingReason } = resolveModel(messages, options, this.config);
+    logger.debug({ model, routingReason, provider: this.config.name }, "Model routed (chat)");
     try {
       const response = await this.client.chat.completions.create({
         ...this.buildParams(model, options),
@@ -321,7 +301,6 @@ class OpenAICompatibleProvider implements ModelProvider {
           `choices[0].message.content = ${JSON.stringify(content)}`
         );
       }
-
       return {
         content,
         usage: {
@@ -340,8 +319,8 @@ class OpenAICompatibleProvider implements ModelProvider {
     onChunk: (text: string) => void,
     options: ChatOptions = {}
   ): Promise<ModelResponse> {
-    const { model, routingReason } = routeModel(messages, options, this.config);
-    logger.debug({ model, routingReason, provider: this.config.name }, "Model routed for stream");
+    const { model, routingReason } = resolveModel(messages, options, this.config);
+    logger.debug({ model, routingReason, provider: this.config.name }, "Model routed (stream)");
     try {
       const stream = await this.client.chat.completions.create({
         ...this.buildParams(model, options),
@@ -365,7 +344,6 @@ class OpenAICompatibleProvider implements ModelProvider {
           "Stream completed but no content delta was received"
         );
       }
-
       return { content: fullContent };
     } catch (err) {
       if (err instanceof ModelError) throw err;
@@ -373,6 +351,8 @@ class OpenAICompatibleProvider implements ModelProvider {
     }
   }
 }
+
+// ─── Singleton + lifecycle ────────────────────────────────────────────────────
 
 let providerInstance: ModelProvider | null = null;
 
@@ -387,11 +367,8 @@ export function resetModelProvider(): void {
   providerInstance = null;
 }
 
-// ─── Startup provider diagnostic (call once at server boot) ──────────────────
-// Logs exactly which provider is chosen, which base URL is used, and which
-// model will be routed for coding vs vision tasks.
-// Does NOT make a network request — purely config inspection.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Startup diagnostic ───────────────────────────────────────────────────────
+
 export function logProviderDiagnostic(): void {
   try {
     const config = resolveProviderConfig();
@@ -399,10 +376,14 @@ export function logProviderDiagnostic(): void {
     logger.info(`[DevMind] AI Provider Diagnostic`);
     logger.info(`  Provider     : ${config.name}`);
     logger.info(`  Base URL     : ${config.baseURL}`);
-    logger.info(`  Coding model : ${config.defaultCodingModel}`);
-    logger.info(`  Vision model : ${config.defaultVisionModel}`);
+    logger.info(`  Model auto   : ${config.envModelOverride ? `PINNED → ${config.envModelOverride}` : "enabled (GLM-5.1 for coding, GLM-4.6V for vision)"}`);
     logger.info(`  Temperature  : ${config.supportsTemperature ? "enabled" : "disabled (gpt-5+)"}`);
     logger.info(`  Reason       : ${config.routingReason}`);
+    logger.info(getCapabilitySummary()
+      .split("\n")
+      .map((l) => `  ${l}`)
+      .join("\n")
+    );
     logger.info("─".repeat(60));
   } catch (err) {
     const msg = err instanceof ModelError ? err.message : String(err);
