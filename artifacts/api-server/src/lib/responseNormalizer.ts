@@ -4,10 +4,11 @@
  * Common variations handled:
  *  1. A single valid JSON object (perfect — fast path)
  *  2. JSON wrapped in code fences (``` or ```json)
- *  3. Multiple JSON objects on separate lines
- *  4. Think + executable action combo (picks the executable)
- *  5. Prose text before/after an otherwise valid JSON object
- *  6. Conversational output (no JSON — classified, not a parse failure)
+ *  3. Near-valid JSON with trailing commas or JS comments (repair pass)
+ *  4. Multiple JSON objects on separate lines
+ *  5. Think + executable action combo (picks the executable)
+ *  6. Prose text before/after an otherwise valid JSON object
+ *  7. Conversational output (no JSON — classified, not a parse failure)
  *
  * Conservative safety rules:
  *  - Do NOT invent or fabricate actions
@@ -19,6 +20,7 @@
 export type ExtractionMethod =
   | "direct_parse"    // Perfect JSON — no normalization needed
   | "fence_stripped"  // Stripped markdown code fences then parsed
+  | "json_repaired"   // Repaired common malformations (trailing commas, comments)
   | "first_extracted" // Extracted first JSON object from mixed prose
   | "best_selected";  // Picked best action from multiple JSON objects
 
@@ -84,6 +86,68 @@ function tryParseObject(text: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Attempt to repair common JSON malformations before giving up.
+ * Only applies safe, reversible transformations — never guesses field values.
+ *
+ * Handles:
+ *  - Trailing commas before } or ]
+ *  - JavaScript single-line comments (// ...) inside the JSON structure
+ *  - Unicode BOM at start of string
+ *  - Trailing junk after the last }
+ */
+function tryRepairJson(text: string): Record<string, unknown> | null {
+  let s = text.trim();
+
+  // Strip BOM
+  if (s.charCodeAt(0) === 0xfeff) s = s.slice(1);
+
+  // Strip any trailing text after the last } — find the position of the outermost closing brace
+  const lastBrace = s.lastIndexOf("}");
+  if (lastBrace < 0) return null;
+  s = s.slice(0, lastBrace + 1);
+
+  // Remove JavaScript-style single-line comments that appear outside of strings
+  // We do this by scanning character by character to avoid munging string contents
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (escaped) {
+      result += ch;
+      escaped = false;
+      i++;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      escaped = true;
+      result += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      result += ch;
+      i++;
+      continue;
+    }
+    if (!inString && ch === "/" && s[i + 1] === "/") {
+      // Skip to end of line
+      while (i < s.length && s[i] !== "\n") i++;
+      continue;
+    }
+    result += ch;
+    i++;
+  }
+
+  // Remove trailing commas before } or ]
+  result = result.replace(/,(\s*[}\]])/g, "$1");
+
+  return tryParseObject(result);
 }
 
 function hasAction(obj: Record<string, unknown>): boolean {
@@ -168,6 +232,20 @@ export function normalizeModelResponse(text: string): NormalizeResult {
     const fenced = tryParseObject(deFenced);
     if (fenced && hasAction(fenced)) {
       return { ok: true, action: fenced, method: "fence_stripped" };
+    }
+  }
+
+  // ── Step 2.5: JSON repair pass (trailing commas, JS comments, BOM) ────────
+  // Try on both the raw text and the de-fenced version
+  for (const candidate of [raw, deFenced]) {
+    const repaired = tryRepairJson(candidate);
+    if (repaired && hasAction(repaired)) {
+      return {
+        ok: true,
+        action: repaired,
+        method: "json_repaired",
+        warning: "Repaired malformed JSON (trailing commas / comments stripped).",
+      };
     }
   }
 

@@ -61,8 +61,26 @@ export interface AgentTask {
   failureDetail?: TaskFailureDetail;
 }
 
+// Serialisable summary used for the task list endpoint and persistence.
+// Excludes the (potentially large) events array.
+export type AgentTaskSummary = Omit<AgentTask, "events">;
+
+// Per-task event cap — prevents unbounded memory growth on long-running tasks.
+const MAX_EVENTS_PER_TASK = 300;
+
 const tasks = new Map<string, AgentTask>();
 const taskControllers = new Map<string, AbortController>();
+
+// ─── Persistence hook ─────────────────────────────────────────────────────────
+// Populated by taskPersistence.ts at startup so the session manager never
+// imports persistence directly (avoids circular deps and keeps concerns clean).
+let _onTaskCompleted: ((task: AgentTaskSummary) => void) | null = null;
+
+export function registerTaskCompletionHook(fn: (task: AgentTaskSummary) => void): void {
+  _onTaskCompleted = fn;
+}
+
+// ─── CRUD ─────────────────────────────────────────────────────────────────────
 
 export function createTask(prompt: string): AgentTask {
   const task: AgentTask = {
@@ -106,16 +124,29 @@ export function getTask(id: string): AgentTask | undefined {
   return tasks.get(id);
 }
 
+/** Full task list including events (kept for internal use and single-task fetch). */
 export function listTasks(): AgentTask[] {
   return Array.from(tasks.values()).sort(
     (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
   );
 }
 
+/**
+ * Slim task list without events — used for the /api/agent/tasks list endpoint.
+ * Keeps response payloads small; consumers fetch events on demand via /tasks/:id.
+ */
+export function listTasksSummary(): AgentTaskSummary[] {
+  return listTasks().map(({ events: _events, ...summary }) => summary);
+}
+
+/** Return stored events for a specific task (may be empty if task not found). */
+export function getTaskEvents(taskId: string): AgentEvent[] {
+  return tasks.get(taskId)?.events ?? [];
+}
+
 export function deleteTask(taskId: string): boolean {
   const task = tasks.get(taskId);
   if (!task) return false;
-  // Cancel any running task before deleting
   if (task.status === "running") {
     cancelTask(taskId);
   }
@@ -134,8 +165,21 @@ export function addEvent(
   if (!task) throw new Error(`Task ${taskId} not found`);
 
   const event: AgentEvent = { type, message, data, timestamp: new Date() };
-  task.events.push(event);
+
+  // Cap events to prevent unbounded memory growth on very long tasks
+  if (task.events.length < MAX_EVENTS_PER_TASK) {
+    task.events.push(event);
+  }
+  // Still return the event even if not stored (it will still be broadcast via WS)
+
   return event;
+}
+
+/** Hydrate a completed task from persisted data (used on server start). */
+export function hydratePersistedTask(summary: AgentTaskSummary): void {
+  if (tasks.has(summary.id)) return; // already in memory (e.g. from this session)
+  const task: AgentTask = { ...summary, events: [] };
+  tasks.set(task.id, task);
 }
 
 export function updateTaskStatus(
@@ -157,4 +201,14 @@ export function updateTaskStatus(
   if (summary !== undefined) task.summary = summary;
   if (completion !== undefined) task.completion = completion;
   if (failureDetail !== undefined) task.failureDetail = failureDetail;
+
+  // Notify the persistence layer when a task completes or errors
+  if ((status === "done" || status === "error") && _onTaskCompleted) {
+    const { events: _events, ...taskSummary } = task;
+    try {
+      _onTaskCompleted(taskSummary);
+    } catch {
+      // Persistence errors must never crash the session manager
+    }
+  }
 }

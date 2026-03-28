@@ -39,9 +39,13 @@ interface IdeState {
   //                 task run and kept after completion so task history is viewable
   //                 without a re-fetch. Survives viewingTaskId changes.
   //
+  // taskLogsLoaded — tracks which taskIds have had their events fetched from
+  //                  the backend. Prevents double-loading on repeated clicks.
+  //
   activeTaskId: string | null;
   viewingTaskId: string | null;
   taskLogs: Record<string, AgentLogEvent[]>;
+  taskLogsLoaded: Set<string>;
 
   // ── Connection ───────────────────────────────────────────────────────────────
   isConnected: boolean;
@@ -88,6 +92,13 @@ interface IdeState {
   appendAgentLog: (taskId: string, event: Omit<AgentLogEvent, 'id'>) => void;
 
   /**
+   * Hydrate a task's log bucket from backend-fetched events.
+   * Used when the user clicks a historical task to replay its execution trace.
+   * Marks the task as loaded so the fetch only happens once.
+   */
+  hydrateTaskEvents: (taskId: string, events: Omit<AgentLogEvent, 'id'>[]) => void;
+
+  /**
    * Clear the log bucket of the currently-viewed task.
    * Kept for the "Copy Logs" reset flow.
    */
@@ -105,6 +116,7 @@ export const useIdeStore = create<IdeState>((set) => ({
   activeTaskId: null,
   viewingTaskId: null,
   taskLogs: {},
+  taskLogsLoaded: new Set(),
   isConnected: false,
 
   // ── Editor ──────────────────────────────────────────────────────────────────
@@ -155,16 +167,18 @@ export const useIdeStore = create<IdeState>((set) => ({
 
   // ── Task lifecycle ───────────────────────────────────────────────────────────
 
-  startActiveTask: (taskId) => set((state) => ({
-    activeTaskId: taskId,
-    viewingTaskId: taskId,
-    // Initialise a fresh log bucket; preserve all other task buckets
-    taskLogs: { ...state.taskLogs, [taskId]: [] },
-  })),
+  startActiveTask: (taskId) => set((state) => {
+    const loaded = new Set(state.taskLogsLoaded);
+    loaded.add(taskId); // treat live tasks as "loaded" — events come via WS
+    return {
+      activeTaskId: taskId,
+      viewingTaskId: taskId,
+      taskLogs: { ...state.taskLogs, [taskId]: [] },
+      taskLogsLoaded: loaded,
+    };
+  }),
 
   clearActiveTask: () => set({ activeTaskId: null }),
-  // viewingTaskId intentionally left unchanged so the output panel keeps
-  // showing the just-completed task's execution trace.
 
   setViewingTask: (taskId) => set({ viewingTaskId: taskId }),
 
@@ -177,6 +191,19 @@ export const useIdeStore = create<IdeState>((set) => ({
       ],
     },
   })),
+
+  hydrateTaskEvents: (taskId, events) => set((state) => {
+    if (state.taskLogsLoaded.has(taskId)) return state; // already loaded
+    const loaded = new Set(state.taskLogsLoaded);
+    loaded.add(taskId);
+    return {
+      taskLogsLoaded: loaded,
+      taskLogs: {
+        ...state.taskLogs,
+        [taskId]: events.map(ev => ({ ...ev, id: ++logIdCounter })),
+      },
+    };
+  }),
 
   clearAgentLogs: () => set((state) =>
     state.viewingTaskId

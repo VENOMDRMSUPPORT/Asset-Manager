@@ -601,10 +601,10 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
             `Normalize failed [${reason}]`
           );
 
-          const failMsg = `Response parse failed [${reason}] (attempt ${consecutiveParseFailures}/${MAX_CONSECUTIVE_PARSE_FAILURES}).\n${detail}`;
-          emit(taskId, "error", failMsg);
-
           if (consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
+            // Final failure — surface as a visible error
+            const failMsg = `Model returned ${MAX_CONSECUTIVE_PARSE_FAILURES} unparseable responses in a row.\nLast failure: [${reason}] ${detail.slice(0, 300)}`;
+            emit(taskId, "error", failMsg);
             failTask(taskId, task, `Model returned ${MAX_CONSECUTIVE_PARSE_FAILURES} unparseable responses in a row`, {
               title: `Model failed to produce valid JSON ${MAX_CONSECUTIVE_PARSE_FAILURES} times`,
               detail: `Last failure reason: ${reason}\n${detail}`,
@@ -614,6 +614,10 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
             return;
           }
 
+          // Early failure (attempt 1 or 2) — emit a quiet status, not an error.
+          // Most models recover on the first retry; showing a red error card is noisy.
+          emit(taskId, "status", `Retrying response format (attempt ${consecutiveParseFailures})…`);
+
           const retryMsg = buildRetryInstruction(reason, responseText.slice(0, 300));
           messages.push({ role: "user", content: retryMsg });
           continue;
@@ -622,10 +626,12 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         consecutiveParseFailures = 0;
 
         const { action, method, warning } = normalized;
-        if (method !== "direct_parse") {
+        // Only log non-trivial normalization paths
+        if (method !== "direct_parse" && method !== "fence_stripped") {
           logger.debug({ taskId, step, method, warning }, `Response normalized via ${method}`);
         }
-        if (warning) {
+        if (warning && method !== "json_repaired") {
+          // json_repaired is expected and not concerning — skip the warn log
           logger.warn({ taskId, step, method, warning }, "Normalization warning");
         }
 

@@ -1,6 +1,12 @@
 import { Router, type IRouter } from "express";
 import { runAgentTask } from "../lib/agentLoop.js";
-import { getTask, listTasks, cancelTask, deleteTask } from "../lib/sessionManager.js";
+import {
+  getTask,
+  listTasksSummary,
+  getTaskEvents,
+  cancelTask,
+  deleteTask,
+} from "../lib/sessionManager.js";
 import { broadcastTaskUpdate } from "../lib/wsServer.js";
 
 const router: IRouter = Router();
@@ -21,11 +27,13 @@ router.post("/agent/tasks", async (req, res) => {
   }
 });
 
+// Slim list — excludes events array for fast payload
 router.get("/agent/tasks", (_req, res) => {
-  const tasks = listTasks();
+  const tasks = listTasksSummary();
   res.json({ tasks });
 });
 
+// Full task including all stored events — used for replay
 router.get("/agent/tasks/:taskId", (req, res) => {
   const { taskId } = req.params;
   const task = getTask(taskId);
@@ -36,6 +44,19 @@ router.get("/agent/tasks/:taskId", (req, res) => {
   }
 
   res.json(task);
+});
+
+// Events-only endpoint for lightweight replay without re-fetching full task body
+router.get("/agent/tasks/:taskId/events", (req, res) => {
+  const { taskId } = req.params;
+  const task = getTask(taskId);
+
+  if (!task) {
+    res.status(404).json({ error: "not_found", message: `Task ${taskId} not found` });
+    return;
+  }
+
+  res.json({ taskId, events: getTaskEvents(taskId) });
 });
 
 router.post("/agent/tasks/:taskId/cancel", (req, res) => {

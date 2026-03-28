@@ -32,7 +32,10 @@ Local Node.js Server (Express, artifacts/api-server)
   ├── Terminal (lib/terminal.ts)       → runs shell commands in workspace
   ├── Model Adapter (lib/modelAdapter.ts) → OpenAI-compatible (Replit integration or ZAI)
   ├── Agent Loop (lib/agentLoop.ts)    → orchestrates full task execution
-  ├── Session Manager (lib/sessionManager.ts) → in-memory task storage + failure details
+  ├── Session Manager (lib/sessionManager.ts) → in-memory task storage, events (300-cap), failure details
+  ├── Task Persistence (lib/taskPersistence.ts) → saves/loads ~/.devmind/history.json (max 100 tasks)
+  ├── Project Index (lib/projectIndex.ts) → file relevance scoring (TTL 60s, min score 2, max 15 files)
+  ├── Response Normalizer (lib/responseNormalizer.ts) → JSON extraction + repair (trailing commas, comments, BOM)
   └── WS Server (lib/wsServer.ts)     → WebSocket for real-time streaming
 ```
 
@@ -128,7 +131,7 @@ Vite proxies `/api` (HTTP) and `/api/ws` (WebSocket) from port 5173 to the API s
 ## Task Observability
 
 Each task in the session manager stores:
-- `events[]` — full event stream (status, thought, file_read, file_write, command, command_output, error, done)
+- `events[]` — full event stream (status, thought, file_read, file_write, command, command_output, error, done) — capped at 300 events per task
 - `summary` — final human-readable summary
 - `completion` — structured completion data (changed_files, commands_run, final_status, remaining)
 - `failureDetail` — structured failure info (title, detail, step, category) — only on error status
@@ -136,8 +139,23 @@ Each task in the session manager stores:
 Failure categories: `model | tool | command | workspace | orchestration | cancelled`
 
 The UI surfaces failure details in:
-- **Agent Activity panel** — red FailureCard with title, technical detail, step, and category badge
-- **Task History** — expandable error detail per card showing failure category + message
+- **Execution Feed panel** — stage-aware thought items with colored badges (PLANNING/INSPECTING/EDITING/VERIFYING/REPAIRING/WRAPPING UP), compact file ops, repair count + "verified" badge; red FailureCard with title, technical detail, step, and category badge
+- **Task History** — expandable error detail per card showing failure category + message; clicking a historical task replays its events via `GET /api/agent/tasks/:id/events`
+
+## Task Persistence
+
+- Tasks are persisted to `~/.devmind/history.json` (configurable via `DEVMIND_DATA_DIR` env var)
+- Max 100 tasks stored; loaded at server startup
+- Frontend hydrates events on historical task click via `hydrateTaskEvents()` (one-fetch-per-task via `taskLogsLoaded` Set)
+
+## Parse Recovery
+
+`responseNormalizer.ts` extracts JSON from model responses using multiple strategies:
+1. `json_block` — fenced code block extraction
+2. `first_object` — regex-based first `{...}` extraction  
+3. `json_repaired` — `tryRepairJson()` — strips trailing commas, JS comments, BOM before parsing
+
+In the agent loop, parse failures on attempts 1–2 emit a quiet `status` event (not visible as an error card); only the final failed attempt shows a red error card.
 
 ## Agent Loop
 

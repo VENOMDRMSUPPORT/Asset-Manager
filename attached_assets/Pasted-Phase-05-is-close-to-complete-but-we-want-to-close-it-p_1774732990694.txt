@@ -1,0 +1,207 @@
+Phase 05 is close to complete, but we want to close it properly with one final bounded closeout pass.
+
+This is NOT a new broad phase.
+This is a focused **Phase 05 Closeout Pass** to eliminate the remaining weaknesses and add the final operator-facing polish needed before we declare the phase complete.
+
+## Current state
+
+VenomGPT now has:
+- local-first architecture
+- workspace-scoped file operations
+- command execution
+- parser/response normalization hardening
+- Z.AI multi-lane routing
+- automatic model selection and fallback
+- task lifecycle UI fixes
+- stage-aware execution feed
+- stronger verification/repair behavior
+- project intelligence basics
+- successful local validation on conversational, file, command, cleanup, and repair tasks
+
+## Remaining issues we want to close in this pass
+
+1. Parse failures can still appear in some tasks, even though recovery is much better now.
+2. Project intelligence still needs stronger validation/refinement on larger or noisier workspaces.
+3. Historical persistence/replay is still not at the maturity level we want.
+4. The operator-facing execution UI still needs a more professional “Asset Manager / Replit-like” feel.
+
+## Job
+
+Implement a final bounded closeout pass for Phase 05.
+
+Do not redesign the whole app.
+Do not start a new phase.
+Do not drift into broad feature expansion.
+
+Make focused code changes, verify them locally, and report real results.
+
+---
+
+# Part 1 — Parse/Recovery Tightening
+
+## Goal
+Reduce visible malformed-response failures and make recovery quieter and more robust.
+
+## Requirements
+- improve malformed JSON/action extraction when model output is close to valid
+- reduce noisy visible parse failure events when recovery succeeds immediately afterward
+- preserve honest classification when recovery truly fails
+- do not fake success
+- do not remove the recovery/evidence discipline already added
+
+We want:
+- fewer “attempt 1/3 malformed” moments on normal tasks
+- better first-pass resilience
+- same honesty when the model is actually unusable
+
+---
+
+# Part 2 — Project Intelligence Stress Pass
+
+## Goal
+Strengthen project intelligence under larger/noisier workspaces.
+
+## Requirements
+- validate/refine ignore rules on larger realistic workspaces
+- improve relevance selection where needed
+- confirm the agent avoids wasting effort on irrelevant/heavy paths
+- confirm step counts and file reads remain more selective than before
+- preserve safety and correctness
+
+Examples of areas to improve if needed:
+- node_modules
+- dist
+- build
+- coverage
+- tmp
+- vendor
+- generated artifacts
+- logs
+- large irrelevant folders
+
+This should be refinement and validation, not a brand-new indexing platform rewrite.
+
+---
+
+# Part 3 — Historical Persistence / Replay Improvement
+
+## Goal
+Bring task replay/history closer to a professional operator experience.
+
+## Requirements
+- completed task details should remain reopenable more reliably
+- preserve or rehydrate useful task execution details after normal interaction
+- improve persistence/replay beyond fragile in-memory-only behavior where practical
+- if full backend persistence is too large for this pass, implement the strongest bounded version that materially improves task-history usability
+- clearly distinguish:
+  - active task
+  - selected/viewing historical task
+  - completed task summary
+  - replayable details/logs
+
+We want the user to be able to inspect prior work in a serious way, not lose it too easily.
+
+---
+
+# Part 4 — Operator-Facing Execution UI Polish
+
+## Goal
+Make the runtime experience feel more like a professional execution console / asset manager, closer in spirit to Replit.
+
+This is NOT a request for cosmetic redesign for its own sake.
+This is a request for a more useful operator-facing execution surface.
+
+## Requirements
+
+### A) Left-side execution feed / asset-manager feel
+Add or improve a dedicated operator-facing execution feed that shows what the assistant is doing in a structured, professional way.
+
+Desired behavior:
+- grouped execution updates
+- meaningful action summaries
+- visible progress through stages
+- compact but informative updates
+- professional completion summary after task completion
+
+Examples:
+- inspecting relevant files
+- editing target file
+- running verification command
+- repairing after failed verification
+- restarting service
+- clean typecheck
+- completed with evidence
+
+This feed must be grounded in real execution events, not fake narration.
+
+### B) Right-side task context / task management polish
+Improve the right-side task area so it feels more professional and updates live.
+
+Requirements:
+- clearer task list updates
+- better visibility of current/selected task
+- strong live-updating task state
+- better post-completion summary display
+- if useful, show task-relevant files touched / commands run / evidence summary rather than duplicating the entire left file tree
+
+Important:
+Do not create redundant duplicate file explorers just for looks.
+Prefer task context and execution relevance over duplication.
+
+### C) Summary quality
+After a task completes, show a clean professional summary that helps the user trust the result:
+- files changed
+- commands run
+- verification outcome
+- repair attempts if any
+- final status
+
+---
+
+# Guardrails
+
+Do NOT use this pass to:
+- start the visual-analysis/image phase
+- add broad MCP ecosystems
+- redesign the entire interface
+- introduce unrelated feature sprawl
+- weaken the evidence/verification discipline
+
+This is a closeout pass for Phase 05 only.
+
+---
+
+# Verification required
+
+You must verify all of the following locally:
+
+1. normal conversational task
+2. simple file create + verify task
+3. repair task with intentional first failure
+4. noisy/larger workspace task to validate project intelligence
+5. reopen/review historical tasks after additional interaction
+6. confirm operator-facing execution feed feels more structured and useful
+7. confirm summaries remain grounded in real evidence
+8. confirm parse/recovery noise is reduced compared to current behavior
+
+Also report whether:
+- project intelligence was materially improved or just confirmed adequate
+- historical replay persistence materially improved
+- UI/operator visibility is meaningfully closer to a professional tool experience
+
+---
+
+# Final response format
+
+1. What I changed
+2. Why this closeout pass was needed
+3. How parse/recovery behaves now
+4. How project intelligence was refined
+5. How task persistence/replay behaves now
+6. How the execution/operator UI changed
+7. Files changed
+8. Verification performed
+9. Remaining risks / what is intentionally deferred
+
+Do not stop at analysis.
+Make the code changes, run the verification, and report real results.

@@ -123,7 +123,7 @@ const IGNORE_FILENAMES = new Set([
 const MAX_INDEX_FILES = 2_000;
 const MAX_FILE_SIZE   = 1_000_000; // 1 MB — skip binary / generated files
 const MAX_DEPTH       = 8;
-const CACHE_TTL_MS    = 30_000;    // 30 s
+const CACHE_TTL_MS    = 60_000;    // 60 s — doubled from 30 s (reduces rebuild overhead)
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -280,10 +280,18 @@ function scoreFile(file: FileMetadata, terms: string[]): number {
   return score;
 }
 
+// Minimum score to include a file in the relevant set.
+// Score of 2 means at least one keyword match (score 2) OR recency + source type (1+1).
+// This prevents weakly-related files from cluttering the prompt context.
+const MIN_RELEVANCE_SCORE = 2;
+
+// Maximum files to surface in project intelligence (keeps prompts lean)
+const MAX_RELEVANT_FILES = 15;
+
 export function selectRelevantFiles(
   index:    ProjectIndex,
   prompt:   string,
-  maxFiles: number = 20
+  maxFiles: number = MAX_RELEVANT_FILES
 ): FileMetadata[] {
   const terms = prompt
     .toLowerCase()
@@ -291,15 +299,16 @@ export function selectRelevantFiles(
     .filter((t) => t.length > 2 && !STOP_WORDS.has(t));
 
   if (terms.length === 0) {
-    // No useful terms — fall back to most-recently-modified
+    // No useful terms — fall back to most-recently-modified source files
     return [...index.files]
+      .filter((f) => SOURCE_EXTS.has(f.ext))
       .sort((a, b) => b.mtimeMs - a.mtimeMs)
       .slice(0, maxFiles);
   }
 
   return index.files
     .map((f) => ({ file: f, score: scoreFile(f, terms) }))
-    .filter(({ score }) => score > 0)
+    .filter(({ score }) => score >= MIN_RELEVANCE_SCORE)
     .sort((a, b) => b.score - a.score)
     .slice(0, maxFiles)
     .map(({ file }) => file);

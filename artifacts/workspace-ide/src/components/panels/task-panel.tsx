@@ -4,7 +4,8 @@ import { useIdeStore } from '@/store/use-ide-store';
 import { useGetWorkspace, useSetWorkspace } from '@workspace/api-client-react';
 import {
   Bot, Sparkles, Send, Clock, CheckCircle2, Loader2, AlertCircle,
-  X, ChevronDown, ChevronUp, Trash2, FolderOpen, Eye,
+  X, ChevronDown, ChevronUp, Trash2, FolderOpen, Eye, Terminal,
+  FileCheck,
 } from 'lucide-react';
 import { formatDistanceToNow, formatDuration, intervalToDuration } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
@@ -21,6 +22,7 @@ interface TaskCompletion {
   summary?: string;
   final_status?: string;
   changed_files?: string[];
+  commands_run?: string[];
   remaining?: string;
 }
 
@@ -36,6 +38,13 @@ interface TaskShape {
   completion?: TaskCompletion;
 }
 
+interface BackendEvent {
+  type: string;
+  message: string;
+  timestamp: string;
+  data?: Record<string, unknown>;
+}
+
 function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
@@ -48,15 +57,14 @@ export function TaskPanel() {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // ── Store selectors ──────────────────────────────────────────────────────────
-  // activeTaskId  → non-null only while a task is RUNNING  (controls composer lock)
-  // viewingTaskId → which task's logs appear in output panel (survives completion)
-  const startActiveTask = useIdeStore(s => s.startActiveTask);
-  const clearActiveTask = useIdeStore(s => s.clearActiveTask);
-  const setViewingTask  = useIdeStore(s => s.setViewingTask);
-  const activeTaskId    = useIdeStore(s => s.activeTaskId);
-  const viewingTaskId   = useIdeStore(s => s.viewingTaskId);
-  const isConnected     = useIdeStore(s => s.isConnected);
+  const startActiveTask   = useIdeStore(s => s.startActiveTask);
+  const clearActiveTask   = useIdeStore(s => s.clearActiveTask);
+  const setViewingTask    = useIdeStore(s => s.setViewingTask);
+  const hydrateTaskEvents = useIdeStore(s => s.hydrateTaskEvents);
+  const activeTaskId      = useIdeStore(s => s.activeTaskId);
+  const viewingTaskId     = useIdeStore(s => s.viewingTaskId);
+  const taskLogsLoaded    = useIdeStore(s => s.taskLogsLoaded);
+  const isConnected       = useIdeStore(s => s.isConnected);
 
   const queryClient = useQueryClient();
 
@@ -67,7 +75,6 @@ export function TaskPanel() {
     mutation: {
       onSuccess: (data) => {
         setPrompt('');
-        // Mark the new task as actively running AND auto-focus its log output
         startActiveTask(data.taskId);
         setExpandedTaskId(null);
         queryClient.invalidateQueries({ queryKey: getListAgentTasksQueryKey() });
@@ -86,7 +93,6 @@ export function TaskPanel() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Block only if a task is truly running — not just because one is selected
     if (!prompt.trim() || isPending || activeTaskId) return;
     startTask({ data: { prompt: prompt.trim() } });
   };
@@ -126,21 +132,31 @@ export function TaskPanel() {
     }
   };
 
-  const handleTaskClick = (task: TaskShape) => {
-    // Only switch which task the output panel displays.
-    // Never touch activeTaskId here — that would lock the composer incorrectly.
+  const handleTaskClick = useCallback(async (task: TaskShape) => {
+    // Switch the output panel to this task
     setViewingTask(task.id);
     setExpandedTaskId(prev => prev === task.id ? null : task.id);
-  };
 
-  // Composer is locked only while a task is truly running
+    // If the task is completed and we haven't fetched its events yet, load them
+    if (task.status !== 'running' && !taskLogsLoaded.has(task.id)) {
+      try {
+        const res = await fetch(`/api/agent/tasks/${task.id}/events`);
+        if (res.ok) {
+          const data = await res.json() as { events: BackendEvent[] };
+          hydrateTaskEvents(task.id, data.events ?? []);
+        }
+      } catch {
+        // Silently ignore — the output panel will show "no log available"
+      }
+    }
+  }, [setViewingTask, taskLogsLoaded, hydrateTaskEvents]);
+
   const isRunning = isPending || activeTaskId !== null;
-
   const tasks = (historyData?.tasks ?? []) as TaskShape[];
 
   return (
     <div className="bg-panel flex flex-col h-full overflow-hidden" style={{ gridArea: 'taskbar' }}>
-      {/* ── Header ──────────────────────────────────────────────────────── */}
+      {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="h-12 border-b border-panel-border flex items-center px-4 shrink-0 bg-background/50">
         <h2 className="text-sm font-semibold flex items-center gap-2 text-foreground">
           <Bot className="w-4 h-4 text-primary" />
@@ -152,10 +168,10 @@ export function TaskPanel() {
         </div>
       </div>
 
-      {/* ── Scrollable middle ─────────────────────────────────────────── */}
+      {/* ── Scrollable middle ───────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
 
-        {/* Running task banner — shown ONLY while a task is truly running */}
+        {/* Running task banner */}
         {activeTaskId && (
           <div className="px-4 pt-3 pb-0 shrink-0">
             <div className="p-3 rounded-lg border border-primary/20 bg-primary/10 flex items-center justify-between">
@@ -218,10 +234,10 @@ export function TaskPanel() {
               </div>
             ) : (
               tasks.map((task) => {
-                const isExpanded   = expandedTaskId === task.id;
-                const isActive     = activeTaskId === task.id;   // currently running
-                const isViewing    = viewingTaskId === task.id;  // output panel is showing this
-                const hasDetail    = task.status === 'error'
+                const isExpanded = expandedTaskId === task.id;
+                const isActive   = activeTaskId === task.id;
+                const isViewing  = viewingTaskId === task.id;
+                const hasDetail  = task.status === 'error'
                   ? !!(task.failureDetail?.title || task.summary)
                   : !!(task.completion?.summary || task.summary);
 
@@ -236,17 +252,14 @@ export function TaskPanel() {
                           : 'bg-background hover:bg-panel-border/50 border-panel-border'
                       }`}
                   >
-                    <div
-                      className="p-3 cursor-pointer"
-                      onClick={() => handleTaskClick(task)}
-                    >
+                    <div className="p-3 cursor-pointer" onClick={() => handleTaskClick(task)}>
                       <div className="flex items-start justify-between gap-2 mb-1.5">
                         <p className="text-sm font-medium text-foreground line-clamp-2 leading-snug flex-1">
                           {task.prompt}
                         </p>
                         <div className="flex items-center gap-1 shrink-0">
                           {isViewing && !isActive && (
-                            <span title="Currently viewing in output panel">
+                            <span title="Currently viewing in execution feed">
                               <Eye className="w-3 h-3 text-primary/60" />
                             </span>
                           )}
@@ -303,7 +316,7 @@ export function TaskPanel() {
         </div>
       </div>
 
-      {/* ── Fixed bottom composer ────────────────────────────────────────── */}
+      {/* ── Fixed bottom composer ─────────────────────────────────────── */}
       <div className="border-t border-panel-border p-4 shrink-0 bg-background/30">
         <form onSubmit={handleSubmit} className="relative">
           <textarea
@@ -325,11 +338,10 @@ export function TaskPanel() {
               className="p-2 bg-primary text-primary-foreground rounded-lg shadow-lg shadow-primary/20 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all group"
               title="Submit (⌘/Ctrl+Enter)"
             >
-              {isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-              )}
+              {isPending
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <Send className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+              }
             </button>
           </div>
         </form>
@@ -340,21 +352,11 @@ export function TaskPanel() {
 
 function ErrorDetail({ failure }: { failure: TaskFailureDetail }) {
   const categoryLabel: Record<string, string> = {
-    model: 'AI Provider',
-    missing_api_key: 'Missing Key',
-    invalid_api_key: 'Invalid Key',
-    model_not_found: 'Model Not Found',
-    insufficient_balance: 'Insufficient Balance',
-    entitlement_error: 'Access Denied',
-    rate_limit: 'Rate Limited',
-    network_error: 'Network Error',
-    base_url_error: 'Bad URL',
-    context_length: 'Context Too Long',
-    tool: 'Tool',
-    command: 'Command',
-    workspace: 'Workspace',
-    orchestration: 'Internal',
-    cancelled: 'Cancelled',
+    model: 'AI Provider', missing_api_key: 'Missing Key', invalid_api_key: 'Invalid Key',
+    model_not_found: 'Model Not Found', insufficient_balance: 'Insufficient Balance',
+    entitlement_error: 'Access Denied', rate_limit: 'Rate Limited',
+    network_error: 'Network Error', base_url_error: 'Bad URL', context_length: 'Context Too Long',
+    tool: 'Tool', command: 'Command', workspace: 'Workspace', orchestration: 'Internal', cancelled: 'Cancelled',
   };
 
   return (
@@ -364,9 +366,7 @@ function ErrorDetail({ failure }: { failure: TaskFailureDetail }) {
           {categoryLabel[failure.category] ?? failure.category} error
         </span>
       )}
-      {failure.title && (
-        <p className="text-xs text-red-300 font-medium leading-snug">{failure.title}</p>
-      )}
+      {failure.title && <p className="text-xs text-red-300 font-medium leading-snug">{failure.title}</p>}
       {failure.detail && (
         <pre className="text-xs text-red-400/80 bg-red-400/5 border border-red-400/10 rounded p-2 whitespace-pre-wrap break-words font-mono leading-relaxed">
           {failure.detail}
@@ -377,18 +377,49 @@ function ErrorDetail({ failure }: { failure: TaskFailureDetail }) {
 }
 
 function SuccessDetail({ completion }: { completion: TaskCompletion }) {
+  const statusKey = (completion.final_status ?? 'complete') as 'complete' | 'partial' | 'blocked';
+  const statusBadge = {
+    complete: 'text-green-400 bg-green-400/10 border-green-400/20',
+    partial:  'text-amber-400 bg-amber-400/10 border-amber-400/20',
+    blocked:  'text-red-400 bg-red-400/10 border-red-400/20',
+  }[statusKey];
+
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
+      {completion.final_status && completion.final_status !== 'complete' && (
+        <span className={`text-xs border px-2 py-0.5 rounded-full inline-block capitalize ${statusBadge}`}>
+          {completion.final_status}
+        </span>
+      )}
       {completion.summary && (
         <p className="text-xs text-muted-foreground leading-relaxed">{completion.summary}</p>
       )}
       {completion.changed_files && completion.changed_files.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {completion.changed_files.map((f, i) => (
-            <span key={i} className="text-xs font-mono text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded">
-              {f}
-            </span>
-          ))}
+        <div>
+          <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-1 flex items-center gap-1">
+            <FileCheck className="w-3 h-3" /> Files changed
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {completion.changed_files.map((f, i) => (
+              <span key={i} className="text-xs font-mono text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded">
+                {f}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {completion.commands_run && completion.commands_run.length > 0 && (
+        <div>
+          <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-1 flex items-center gap-1">
+            <Terminal className="w-3 h-3" /> Commands run
+          </p>
+          <div className="flex flex-col gap-0.5">
+            {completion.commands_run.map((c, i) => (
+              <span key={i} className="text-xs font-mono text-cyan-400/80 bg-cyan-400/5 px-1.5 py-0.5 rounded truncate" title={c}>
+                $ {c}
+              </span>
+            ))}
+          </div>
         </div>
       )}
       {completion.remaining && (
@@ -400,13 +431,9 @@ function SuccessDetail({ completion }: { completion: TaskCompletion }) {
 
 function StatusIcon({ status }: { status: string }) {
   switch (status) {
-    case 'running':
-      return <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />;
-    case 'done':
-      return <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />;
-    case 'error':
-      return <AlertCircle className="w-4 h-4 text-destructive shrink-0" />;
-    default:
-      return <Clock className="w-4 h-4 text-muted-foreground shrink-0" />;
+    case 'running': return <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />;
+    case 'done':    return <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />;
+    case 'error':   return <AlertCircle className="w-4 h-4 text-destructive shrink-0" />;
+    default:        return <Clock className="w-4 h-4 text-muted-foreground shrink-0" />;
   }
 }
