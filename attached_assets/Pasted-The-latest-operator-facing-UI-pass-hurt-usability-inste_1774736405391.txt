@@ -1,0 +1,95 @@
+The latest operator-facing UI pass hurt usability instead of improving it.
+
+The execution behavior is strong, but the UI layout has become worse:
+- the execution feed dominates too much vertical space
+- readability is worse
+- the page feels oversized and unbalanced
+- important content requires zooming out too much to inspect comfortably
+- the operator-facing polish overshot into a layout regression
+
+This is NOT a new redesign request.
+This is a **targeted UI usability correction pass**.
+
+## Goal
+
+Restore a balanced, readable, professional layout while preserving the useful execution-feed improvements.
+
+## What went wrong
+
+The UI moved too far toward “feed dominance” and lost layout balance.
+The result is less usable, not more professional.
+
+We need:
+- better proportions
+- better readability
+- better density
+- better scanning
+- without losing execution visibility
+
+## Requirements
+
+### 1) Rebalance layout proportions
+- reduce the visual dominance of the execution feed
+- restore a more comfortable balance between:
+  - editor area
+  - execution feed
+  - task panel
+  - file explorer / sidebar
+- the user should not need to zoom out excessively just to read the full task output comfortably
+
+### 2) Preserve the good parts
+Do NOT remove:
+- execution feed itself
+- stage-aware updates
+- completion summaries
+- files changed / commands run sections
+- task context/history improvements
+- VenomGPT naming
+- persistence/replay work already done
+
+### 3) Improve readability
+- reduce oversized vertical consumption
+- improve scanability of execution entries
+- tighten spacing where needed
+- keep completion summaries readable without becoming gigantic blocks
+- avoid making the entire page feel like one huge scrolling log
+
+### 4) Make the feed useful, not overwhelming
+The execution feed should support trust and debugging, but it should not overpower the whole workspace.
+
+Desired outcome:
+- clear and readable
+- easy to scan
+- professionally compact
+- still useful during live execution
+
+### 5) Avoid a broad redesign
+Do not redesign the entire product.
+Do not invent a new information architecture.
+Do not start another visual experiment.
+
+This is a **layout correction and usability recovery pass**.
+
+## Verification required
+
+You must verify locally and report:
+
+1. the UI no longer requires excessive zoom-out to inspect task output comfortably
+2. the execution feed remains useful but is less visually overwhelming
+3. editor/workspace/task areas remain balanced
+4. completion summaries remain readable
+5. no regressions in execution behavior, task history, replay, or persistence
+
+Include screenshots if useful.
+
+## Final response format
+
+1. What I changed
+2. Why the previous layout was worse
+3. How the layout balance/readability was corrected
+4. Files changed
+5. Verification performed
+6. Remaining risks / intentionally deferred items
+
+Do not stop at analysis.
+Make the code changes, verify them, and report real results.

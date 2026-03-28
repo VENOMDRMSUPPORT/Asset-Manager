@@ -193,10 +193,10 @@ export function OutputPanel() {
       <div
         ref={agentScrollRef}
         onScroll={activeTab === 'agent' ? handleAgentScroll : undefined}
-        className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-panel-border scrollbar-track-transparent bg-[#0a0a0c] p-4 font-mono text-sm"
+        className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-panel-border scrollbar-track-transparent bg-[#0a0a0c] p-3 font-mono text-sm"
       >
         {activeTab === 'agent' && (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             {agentLogs.length === 0 ? (
               <div className="text-muted-foreground text-center mt-10 text-sm">
                 {viewingTaskId
@@ -290,16 +290,14 @@ function AgentLogItem({ log }: { log: AgentLogEvent }) {
     );
   }
 
-  // Command: prominent card
+  // Command: single-row with command inline
   if (log.type === 'command') {
+    const cmd = log.message.replace(/^Running:\s*/, '');
     return (
-      <div className="px-3 py-2 rounded-lg bg-cyan-400/5 border border-cyan-400/15 text-xs space-y-0.5">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-3 h-3 shrink-0 text-cyan-400" />
-          <span className="text-cyan-400 font-semibold uppercase tracking-wider text-[10px]">Run</span>
-          <Timestamp ts={log.timestamp} />
-        </div>
-        <pre className="text-cyan-200 font-mono text-xs whitespace-pre-wrap break-all mt-1 leading-relaxed">$ {log.message.replace(/^Running:\s*/, '')}</pre>
+      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded border bg-cyan-400/5 border-cyan-400/15 text-xs">
+        <Terminal className="w-3 h-3 shrink-0 text-cyan-400" />
+        <pre className="text-cyan-200 font-mono text-xs flex-1 truncate">$ {cmd}</pre>
+        <Timestamp ts={log.timestamp} />
       </div>
     );
   }
@@ -318,16 +316,13 @@ function AgentLogItem({ log }: { log: AgentLogEvent }) {
     );
   }
 
-  // Error
+  // Error — single row, message truncated
   if (log.type === 'error') {
     return (
-      <div className="px-3 py-2 rounded-lg bg-red-400/8 border border-red-400/20 text-xs space-y-1">
-        <div className="flex items-center gap-2">
-          <AlertCircle className="w-3.5 h-3.5 shrink-0 text-red-400" />
-          <span className="text-red-400 font-semibold uppercase tracking-wider text-[10px]">Error</span>
-          <Timestamp ts={log.timestamp} />
-        </div>
-        <p className="text-red-300 whitespace-pre-wrap break-words leading-relaxed">{log.message}</p>
+      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded border bg-red-400/8 border-red-400/20 text-xs">
+        <AlertCircle className="w-3 h-3 shrink-0 text-red-400" />
+        <span className="text-red-300 truncate flex-1">{log.message}</span>
+        <Timestamp ts={log.timestamp} />
       </div>
     );
   }
@@ -350,28 +345,23 @@ function ThoughtItem({ log }: { log: AgentLogEvent }) {
     const style = STAGE_STYLE[stage];
     const Icon = style.icon;
     return (
-      <div className={`px-3 py-2 rounded-lg border text-xs ${style.bg} ${style.border} space-y-1`}>
-        <div className="flex items-center gap-2">
+      <div className={`px-2.5 py-1.5 rounded border text-xs ${style.bg} ${style.border}`}>
+        <div className="flex items-center gap-1.5">
           <Icon className={`w-3 h-3 shrink-0 ${style.color}`} />
           <span className={`font-semibold uppercase tracking-wider text-[10px] ${style.color}`}>{stage}</span>
+          {body && <span className="text-gray-300 text-xs truncate flex-1">{body}</span>}
           <Timestamp ts={log.timestamp} />
         </div>
-        {body && (
-          <p className="text-gray-300 text-xs whitespace-pre-wrap break-words leading-relaxed">{body}</p>
-        )}
       </div>
     );
   }
 
-  // Unstaged thought (model thinking without a tag)
+  // Unstaged thought — single-line compact row
   return (
-    <div className="px-3 py-2 rounded-lg bg-gray-400/5 border border-gray-400/10 text-xs space-y-1">
-      <div className="flex items-center gap-2">
-        <Settings className="w-3 h-3 shrink-0 text-gray-400/60" />
-        <span className="font-semibold uppercase tracking-wider text-[10px] text-gray-400/60">Thinking</span>
-        <Timestamp ts={log.timestamp} />
-      </div>
-      {body && <p className="text-gray-300 text-xs whitespace-pre-wrap break-words leading-relaxed">{body}</p>}
+    <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground/70">
+      <Settings className="w-3 h-3 shrink-0 text-gray-400/40" />
+      {body && <span className="truncate flex-1">{body}</span>}
+      <Timestamp ts={log.timestamp} />
     </div>
   );
 }
@@ -407,7 +397,7 @@ function FailureCard({ data }: { data: FailureData }) {
         : <AlertCircle className="w-4 h-4 text-red-400" />;
 
   return (
-    <div className={`rounded-xl border p-4 space-y-3 mt-2 ${isCancelled ? 'border-amber-500/30 bg-amber-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+    <div className={`rounded-lg border p-3 space-y-2 mt-1.5 ${isCancelled ? 'border-amber-500/30 bg-amber-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
       <div className="flex items-center gap-2">
         {icon}
         <span className={`font-semibold text-sm ${isCancelled ? 'text-amber-400' : 'text-red-400'}`}>
@@ -459,7 +449,7 @@ function CompletionCard({ data, repairCount }: { data: CompletionData; repairCou
     : null;
 
   return (
-    <div className={`rounded-xl border p-4 space-y-3 mt-2 ${statusColor}`}>
+    <div className={`rounded-lg border p-3 space-y-2 mt-1.5 ${statusColor}`}>
       {/* Header */}
       <div className="flex items-center gap-2 flex-wrap">
         {statusIcon}
