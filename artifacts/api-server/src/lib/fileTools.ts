@@ -9,17 +9,49 @@ export interface FileEntry {
   children?: FileEntry[];
 }
 
-const IGNORED_DIRS = new Set([
+// Re-export the authoritative ignore list from projectIndex so fileTools
+// and the project intelligence layer stay in sync. Then extend it with a
+// broader set for the interactive file-tree browser.
+export const IGNORED_DIRS = new Set([
+  // Package managers
   "node_modules",
-  ".git",
-  ".next",
+  "vendor",
+  "bower_components",
+  // Build outputs
   "dist",
   "build",
-  ".cache",
+  "out",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  "target",
   "__pycache__",
+  // Caches
+  ".cache",
+  ".parcel-cache",
+  ".turbo",
+  ".sass-cache",
+  ".gradle",
+  // Test / coverage
+  "coverage",
+  ".nyc_output",
+  ".pytest_cache",
+  "htmlcov",
+  // VCS
+  ".git",
+  ".hg",
+  ".svn",
+  // IDEs
+  ".idea",
+  ".vscode",
+  // Virtual envs
   ".venv",
   "venv",
-  ".turbo",
+  // Temp
+  "tmp",
+  "temp",
+  ".temp",
+  ".tmp",
 ]);
 
 const MAX_DEPTH = 6;

@@ -15,19 +15,17 @@ import {
 } from "./sessionManager.js";
 import { broadcastAgentEvent, broadcastTaskUpdate, broadcastTerminalOutput } from "./wsServer.js";
 import { getWorkspaceRoot, isWorkspaceSet } from "./safety.js";
+import { getProjectIndex, selectRelevantFiles, buildProjectSummary, invalidateProjectIndex } from "./projectIndex.js";
 import { logger } from "./logger.js";
+
+// ─── Event helpers ────────────────────────────────────────────────────────────
 
 function emit(taskId: string, type: Parameters<typeof addEvent>[1], message: string, data?: Record<string, unknown>): void {
   const event = addEvent(taskId, type, message, data);
   broadcastAgentEvent(taskId, event);
 }
 
-function failTask(
-  taskId: string,
-  task: AgentTask,
-  summary: string,
-  failure: TaskFailureDetail
-): void {
+function failTask(taskId: string, task: AgentTask, summary: string, failure: TaskFailureDetail): void {
   logger.error(
     { taskId, category: failure.category, step: failure.step, detail: failure.detail },
     `Task failed [${failure.category}] at step "${failure.step}": ${failure.title}`
@@ -42,9 +40,9 @@ function failTask(
   broadcastTaskUpdate(task);
 }
 
-// ─── Conversational prompt detection ─────────────────────────────────────────
-// These prompts don't need the full agent loop. Handling them separately
-// prevents "no valid JSON action" failures on simple greetings.
+// ─── Conversational bypass ────────────────────────────────────────────────────
+// Short greetings and acks go through a single lightweight chat call rather
+// than the full agent loop. This prevents "no valid JSON action" parse errors.
 
 const CONVERSATIONAL_RE = /^(hi|hello|hey|thanks|thank you|thx|ty|ok|okay|cool|great|bye|goodbye|yes|no|yep|nope|yeah|sure|got it|sounds good|perfect|nice|alright|what|huh)[\s!.,?]*$/i;
 
@@ -55,6 +53,8 @@ function isConversationalPrompt(prompt: string): boolean {
 }
 
 // ─── System prompt ────────────────────────────────────────────────────────────
+// Enforces: stage discipline, verification after edits, repair protocol,
+// evidence-based completion, and minimal-read efficiency.
 
 const SYSTEM_PROMPT = `You are DevMind, an expert AI coding assistant that executes software engineering tasks autonomously on a local codebase.
 
@@ -62,77 +62,179 @@ You operate in a strict JSON action loop. Each response must be EXACTLY one vali
 
 ## Available Actions
 
-### Explore & Read
 {"action":"list_dir","path":"relative/path-or-empty-for-root","reason":"why"}
 {"action":"read_file","path":"relative/file/path","reason":"why you need this file"}
-
-### Reason
-{"action":"think","thought":"your internal analysis of current state and next step"}
-
-### Write & Execute
+{"action":"think","thought":"[STAGE] your analysis"}
 {"action":"write_file","path":"relative/file/path","content":"complete file contents","reason":"what changed and why"}
 {"action":"run_command","command":"shell command","reason":"why","timeout":60}
+{"action":"done","summary":"evidence-based summary","changed_files":["exact list"],"commands_run":["exact list"],"final_status":"complete|partial|blocked","remaining":"unresolved issues or empty"}
 
-### Finish
-{"action":"done","summary":"what was accomplished","changed_files":["list","of","modified","files"],"commands_run":["commands","that","ran"],"final_status":"complete","remaining":"any remaining issues or empty string"}
+## Execution Stages
 
-## Execution Protocol
+Always annotate your think actions with a stage tag:
 
-ALWAYS follow this workflow:
-1. PLAN: Think about what the task requires. What files do you need to see? What changes are needed?
-2. INSPECT: Use list_dir and read_file to understand relevant code before changing anything. Never guess file contents.
-3. EDIT: Write files one at a time with their COMPLETE content (not diffs or partial edits).
-4. VERIFY: Run commands to check your work (build, type-check, test, lint). Examine exit codes.
-5. FIX: If a command fails, read the error, understand the root cause, and fix. Retry different approaches.
-6. SUMMARIZE: End with a structured "done" report regardless of outcome.
+- [PLANNING] — understand the task; identify which files need to change and what verification you will run
+- [INSPECTING] — reading files to understand current state before editing
+- [EDITING] — about to write a file; explain what will change and why
+- [VERIFYING] — confirming the edit or command succeeded
+- [REPAIRING] — diagnosing a failure; deciding how to fix it
+- [WRAPPING UP] — final review before done; confirming evidence
+
+## Workflow
+
+1. PLAN: identify the minimum files you need to read and what you will change
+2. INSPECT: read ONLY the files relevant to the task (do not scan entire project)
+3. EDIT: write files one at a time with their COMPLETE content
+4. VERIFY: after every write_file, confirm the change is correct:
+   - Run a build/lint/type-check command (preferred), OR
+   - Read the file back to confirm the content is correct
+5. REPAIR: if verification fails, diagnose the specific failure and fix it once
+6. SUMMARIZE: report what was done and what evidence confirms it
+
+## Verification Protocol (mandatory)
+
+After every write_file you MUST verify:
+- Run the appropriate build/check command (e.g. npx tsc --noEmit, npm test, python -c "import X"), OR
+- Read the written file back to confirm the content
+
+Do NOT call done before verifying. A done without verification evidence is a weak completion.
+
+## Repair Protocol
+
+When a command fails or verification fails:
+1. Think [REPAIRING]: identify the SPECIFIC error from the output. Read the relevant file or error message.
+2. Fix the root cause with write_file (if the content is wrong) or a different command.
+3. Verify again after the repair.
+4. If the same fix fails twice: call done with final_status "partial" explaining exactly what failed and why.
+5. NEVER repeat the exact same failing command. Always change something first.
+
+## Evidence Requirements
+
+Your done action MUST reflect reality:
+- changed_files: list EVERY file you actually called write_file on (exact paths, no omissions)
+- commands_run: list EVERY command you actually ran with run_command
+- summary: explain what was done AND what evidence confirms it (e.g. "TypeScript compiled clean — exit 0", "test passed", "file verified by read-back")
+- If something failed or is unfinished: say so honestly in remaining
+
+## Step Discipline
+
+- Maximum 25 steps. Use them efficiently.
+- Read the MINIMUM files needed. If the task is "edit function X in file Y", read file Y — not the whole project.
+- The project intelligence section above already identifies likely relevant files — start there.
+- Do not list directories unless you genuinely need to explore structure.
+- Do not read files unrelated to the task.
+- Think deeply before reading — plan what you need first.
 
 ## Rules
+
 - Use RELATIVE paths only. Never use absolute paths.
 - ALWAYS read a file before writing it — never assume file contents.
 - Write the COMPLETE file content when using write_file, not snippets or diffs.
-- If a command fails, examine the error output and attempt a different approach.
 - Do not run unnecessary commands or install unrelated packages.
-- Maximum 30 steps. Use them efficiently — prefer targeted reads over full directory scans.
-- End with "done" whether the task is complete, partially done, or blocked.
+- End with "done" whether the task is complete, partial, or blocked.
 
-## Stopping Conditions
-- Use "done" with final_status "complete" when all changes are working.
-- Use "done" with final_status "partial" when you made progress but couldn't finish (explain in remaining).
-- Use "done" with final_status "blocked" when you cannot proceed due to missing info or permissions.
+## Completion Statuses
+
+- "complete": task is done AND has been verified with real evidence
+- "partial": made real progress, but could not fully complete (explain in remaining)
+- "blocked": cannot proceed without information or access you do not have (explain in remaining)
 
 ## Examples
 
-Example 1 — Adding a function:
-Step 1: {"action":"think","thought":"I need to add a debounce utility. Let me first read the existing utils file to understand the format and avoid conflicts."}
-Step 2: {"action":"read_file","path":"src/utils.ts","reason":"Read existing code before editing"}
-Step 3: {"action":"write_file","path":"src/utils.ts","content":"...complete updated file...","reason":"Added debounce function at the end without changing existing exports"}
-Step 4: {"action":"run_command","command":"npx tsc --noEmit","reason":"Verify TypeScript compiles cleanly","timeout":30}
-Step 5: {"action":"done","summary":"Added debounce utility function","changed_files":["src/utils.ts"],"commands_run":["npx tsc --noEmit"],"final_status":"complete","remaining":""}
+Example 1 — Adding a utility function with verification:
+{"action":"think","thought":"[PLANNING] Need to add a debounce util. Read src/utils.ts first, then verify TypeScript compiles."}
+{"action":"read_file","path":"src/utils.ts","reason":"read before writing to avoid conflict"}
+{"action":"write_file","path":"src/utils.ts","content":"...complete file...","reason":"added debounce at end"}
+{"action":"run_command","command":"npx tsc --noEmit","reason":"verify TypeScript compiles after edit","timeout":30}
+{"action":"done","summary":"Added debounce utility to src/utils.ts. TypeScript compiled clean (exit 0).","changed_files":["src/utils.ts"],"commands_run":["npx tsc --noEmit"],"final_status":"complete","remaining":""}
 
-Example 2 — Fixing a failing test:
-Step 1: {"action":"think","thought":"Need to read the failing test and the module it tests before making any changes."}
-Step 2: {"action":"read_file","path":"tests/auth.test.ts","reason":"Understand what the test asserts"}
-Step 3: {"action":"read_file","path":"src/auth.ts","reason":"Understand current implementation"}
-Step 4: {"action":"write_file","path":"src/auth.ts","content":"...corrected implementation...","reason":"Fixed token validation logic that was causing test failure"}
-Step 5: {"action":"run_command","command":"npx jest tests/auth.test.ts","reason":"Run the test to verify the fix","timeout":60}
-Step 6: {"action":"done","summary":"Fixed token validation bug in auth.ts. Test now passes.","changed_files":["src/auth.ts"],"commands_run":["npx jest tests/auth.test.ts"],"final_status":"complete","remaining":""}`;
+Example 2 — Repair after a failing command:
+{"action":"run_command","command":"npm test","reason":"verify the fix","timeout":60}
+[test fails with "Cannot find module './auth'"]
+{"action":"think","thought":"[REPAIRING] Import path is wrong — file is auth.ts not ./auth. Need to update the import."}
+{"action":"read_file","path":"src/index.ts","reason":"read the broken import before fixing it"}
+{"action":"write_file","path":"src/index.ts","content":"...corrected import...","reason":"fix import path"}
+{"action":"run_command","command":"npm test","reason":"verify repair succeeded","timeout":60}
+{"action":"done","summary":"Fixed wrong import path in src/index.ts. npm test now passes.","changed_files":["src/index.ts"],"commands_run":["npm test","npm test"],"final_status":"complete","remaining":""}`;
+
+// ─── Stage-aware status emission ──────────────────────────────────────────────
+
+/**
+ * Emit a human-readable stage label BEFORE an action executes.
+ * This gives the user a real-time narration of what the agent is doing.
+ */
+function emitStage(
+  taskId:      string,
+  step:        number,
+  maxSteps:    number,
+  actionType:  string,
+  action:      Record<string, unknown>,
+  lastFailed:  boolean
+): void {
+  let label: string;
+
+  switch (actionType) {
+    case "think": {
+      // Extract stage tag from the thought if present
+      const thought = String(action["thought"] ?? "");
+      const match = thought.match(/^\[(PLANNING|INSPECTING|EDITING|VERIFYING|REPAIRING|WRAPPING UP)\]/i);
+      if (match) {
+        const stage = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+        label = `${stage}…`;
+      } else {
+        label = "Planning…";
+      }
+      break;
+    }
+    case "list_dir": {
+      const p = String(action["path"] || "");
+      label = `Exploring: ${p || "workspace root"}`;
+      break;
+    }
+    case "read_file": {
+      const p = String(action["path"] || "");
+      label = `Inspecting: ${p}`;
+      break;
+    }
+    case "write_file": {
+      const p = String(action["path"] || "");
+      label = `Editing: ${p}`;
+      break;
+    }
+    case "run_command": {
+      label = lastFailed ? "Repairing…" : "Verifying…";
+      break;
+    }
+    case "done": {
+      label = "Wrapping up…";
+      break;
+    }
+    default: {
+      label = `Processing: ${actionType}`;
+    }
+  }
+
+  emit(taskId, "status", `[${step}/${maxSteps}] ${label}`);
+}
+
+// ─── Action executor ──────────────────────────────────────────────────────────
 
 interface ActionResult {
   success: boolean;
   output: string;
 }
 
-const MAX_CONTENT_CHARS = 80_000;
+const MAX_CONTENT_CHARS       = 80_000;
 const MAX_CONSECUTIVE_PARSE_FAILURES = 3;
 const DEFAULT_COMMAND_TIMEOUT_S = 120;
-const MAX_COMMAND_TIMEOUT_S = 300;
+const MAX_COMMAND_TIMEOUT_S     = 300;
 
 function pruneMessages(messages: Message[]): Message[] {
   const total = messages.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 500), 0);
   if (total <= MAX_CONTENT_CHARS) return messages;
 
   const system = messages[0];
-  const rest = messages.slice(1);
+  const rest   = messages.slice(1);
   const keepCount = 8;
   const kept = rest.slice(-keepCount);
 
@@ -153,8 +255,8 @@ function formatDirectoryTree(entries: Awaited<ReturnType<typeof listDirectory>>,
 }
 
 async function executeAction(
-  action: Record<string, unknown>,
-  taskId: string,
+  action:  Record<string, unknown>,
+  taskId:  string,
   signal?: AbortSignal
 ): Promise<ActionResult> {
   const actionType = String(action["action"] ?? "");
@@ -170,7 +272,6 @@ async function executeAction(
     case "list_dir": {
       const relPath = String(action["path"] ?? "");
       logger.debug({ taskId, actionType: "list_dir", path: relPath }, "Listing directory");
-      emit(taskId, "status", `Listing directory: ${relPath || "workspace root"}`);
       try {
         const entries = await listDirectory(relPath);
         const tree = formatDirectoryTree(entries);
@@ -200,13 +301,13 @@ async function executeAction(
 
     case "write_file": {
       const filePath = String(action["path"] ?? "");
-      const content = String(action["content"] ?? "");
-      const reason = String(action["reason"] ?? "");
+      const content  = String(action["content"] ?? "");
+      const reason   = String(action["reason"] ?? "");
       logger.debug({ taskId, actionType: "write_file", path: filePath, bytes: content.length }, "Writing file");
       emit(taskId, "file_write", `Writing: ${filePath}`, { path: filePath, reason });
       try {
         await writeFile(filePath, content);
-        return { success: true, output: `File written successfully: ${filePath} (${content.length} chars)` };
+        return { success: true, output: `File written: ${filePath} (${content.length} chars). Now verify this change is correct.` };
       } catch (err) {
         logger.warn({ taskId, path: filePath, err }, "write_file failed");
         return { success: false, output: `Error writing file: ${String(err)}` };
@@ -214,9 +315,9 @@ async function executeAction(
     }
 
     case "run_command": {
-      const command = String(action["command"] ?? "");
+      const command           = String(action["command"] ?? "");
       const requestedTimeoutS = Number(action["timeout"]) || DEFAULT_COMMAND_TIMEOUT_S;
-      const timeoutMs = Math.min(Math.max(requestedTimeoutS, 5), MAX_COMMAND_TIMEOUT_S) * 1000;
+      const timeoutMs         = Math.min(Math.max(requestedTimeoutS, 5), MAX_COMMAND_TIMEOUT_S) * 1000;
 
       logger.info({ taskId, actionType: "run_command", command, timeoutS: timeoutMs / 1000 }, "Running command");
       emit(taskId, "command", `Running: ${command}`, { command, timeoutS: timeoutMs / 1000 });
@@ -244,10 +345,7 @@ async function executeAction(
       try {
         const result = await runCommand(
           command,
-          (data) => {
-            outputBuffer += data;
-            scheduleFlush();
-          },
+          (data) => { outputBuffer += data; scheduleFlush(); },
           timeoutMs,
           signal
         );
@@ -257,15 +355,17 @@ async function executeAction(
 
         logger.info({ taskId, command, exitCode: result.exitCode }, "Command finished");
 
-        const stdoutPreview = result.stdout.slice(0, 4000);
-        const stderrPreview = result.stderr.slice(0, 2000);
+        const stdoutPreview = result.stdout.slice(0, 4_000);
+        const stderrPreview = result.stderr.slice(0, 2_000);
         const output = [
           `Exit code: ${result.exitCode}`,
-          result.stdout ? `stdout:\n${stdoutPreview}${result.stdout.length > 4000 ? "\n...[truncated]" : ""}` : "",
-          result.stderr ? `stderr:\n${stderrPreview}${result.stderr.length > 2000 ? "\n...[truncated]" : ""}` : "",
+          result.stdout ? `stdout:\n${stdoutPreview}${result.stdout.length > 4_000 ? "\n...[truncated]" : ""}` : "",
+          result.stderr ? `stderr:\n${stderrPreview}${result.stderr.length > 2_000 ? "\n...[truncated]" : ""}` : "",
         ].filter(Boolean).join("\n");
 
-        emit(taskId, "command_output", `Exit ${result.exitCode}: ${command.slice(0, 60)}`);
+        const exitLabel = result.exitCode === 0 ? "✓" : `✗ exit ${result.exitCode}`;
+        emit(taskId, "command_output", `${exitLabel}: ${command.slice(0, 80)}`);
+
         return { success: result.exitCode === 0, output };
       } catch (err) {
         if (flushTimer) clearTimeout(flushTimer);
@@ -280,13 +380,18 @@ async function executeAction(
     }
 
     default: {
-      return { success: false, output: `Unknown action type: "${actionType}". Valid actions: think, list_dir, read_file, write_file, run_command, done.` };
+      return {
+        success: false,
+        output: `Unknown action: "${actionType}". Valid: think, list_dir, read_file, write_file, run_command, done.`,
+      };
     }
   }
 }
 
+// ─── Main task runner ─────────────────────────────────────────────────────────
+
 export async function runAgentTask(prompt: string): Promise<AgentTask> {
-  const task = createTask(prompt);
+  const task   = createTask(prompt);
   const taskId = task.id;
   createTaskController(taskId);
 
@@ -299,24 +404,22 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
 
       // ── Workspace validation ──────────────────────────────────────────────
       const wsRoot = isWorkspaceSet() ? getWorkspaceRoot() : null;
-      emit(taskId, "status", `Agent started. Workspace: ${wsRoot ?? "not configured"}`);
+      emit(taskId, "status", `Workspace: ${wsRoot ?? "not configured"}`);
 
       if (!wsRoot) {
         failTask(taskId, task, "Workspace not configured", {
           title: "Workspace root is not configured",
-          detail: "Set a workspace directory in the UI before running tasks. The workspace must already exist on disk.",
+          detail: "Set a workspace directory in the UI before running tasks.",
           step: "workspace_validation",
           category: "workspace",
         });
         return;
       }
 
-      // ── Handle conversational prompts directly (bypass agent loop) ────────
-      // Simple greetings like "hi", "thanks", "ok" don't need file/command tools.
-      // Route them through a single chat call and produce a clean completion.
+      // ── Conversational bypass ─────────────────────────────────────────────
       if (isConversationalPrompt(prompt)) {
-        logger.info({ taskId, prompt }, "Conversational prompt detected — using direct response path");
-        emit(taskId, "status", "Conversational prompt — responding directly.");
+        logger.info({ taskId, prompt }, "Conversational prompt — direct response path");
+        emit(taskId, "status", "Responding…");
 
         let model;
         try {
@@ -344,11 +447,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
 
           emit(taskId, "thought", reply);
           const completion: TaskCompletion = {
-            summary: reply,
-            changed_files: [],
-            commands_run: [],
-            final_status: "complete",
-            remaining: "",
+            summary: reply, changed_files: [], commands_run: [], final_status: "complete", remaining: "",
           };
           emit(taskId, "done", reply, { changed_files: [], commands_run: [], final_status: "complete", remaining: "" });
           updateTaskStatus(taskId, "done", reply, completion);
@@ -365,16 +464,31 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         return;
       }
 
-      // ── Workspace snapshot ────────────────────────────────────────────────
+      // ── Project intelligence ──────────────────────────────────────────────
+      // Build (or retrieve from cache) the project index and select files
+      // likely relevant to this specific prompt. This replaces the raw
+      // full-tree dump with a focused, metadata-enriched summary.
+      emit(taskId, "status", "Analysing workspace…");
+
       let workspaceSnapshot = "";
+      let projectIntelligence = "";
+
       try {
+        // Raw tree (root level only for large projects — kept for structure overview)
         const entries = await listDirectory("");
         workspaceSnapshot = formatDirectoryTree(entries);
-        emit(taskId, "status", `Workspace ready (${entries.length} top-level entries)`);
-        logger.debug({ taskId, entries: entries.length }, "Workspace snapshot loaded");
+
+        // Project index with relevance scoring
+        const index = await getProjectIndex(wsRoot);
+        const relevantFiles = selectRelevantFiles(index, prompt, 20);
+        projectIntelligence = buildProjectSummary(index, relevantFiles);
+
+        emit(taskId, "status", `Workspace ready — ${index.totalFiles} files indexed`);
+        logger.debug({ taskId, totalFiles: index.totalFiles, relevantFiles: relevantFiles.length }, "Project index ready");
       } catch (err) {
         workspaceSnapshot = "(could not read workspace)";
-        logger.warn({ taskId, err }, "Could not snapshot workspace — continuing anyway");
+        projectIntelligence = "";
+        logger.warn({ taskId, err }, "Could not build project index — continuing");
       }
 
       // ── Model initialization ──────────────────────────────────────────────
@@ -387,7 +501,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         failTask(taskId, task, `Model configuration error: ${isModelError ? err.message : String(err)}`, {
           title: isModelError ? err.message : "Failed to initialize AI model",
           detail: isModelError
-            ? `Category: ${err.category}\nTechnical: ${err.technical}\n\nTip: Copy .env.example to .env in the repo root and fill in ZAI_API_KEY.`
+            ? `Category: ${err.category}\nTechnical: ${err.technical}\n\nTip: Ensure ZAI_API_KEY is set.`
             : String(err),
           step: "model_initialization",
           category: "model",
@@ -395,25 +509,40 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         return;
       }
 
-      // ── Agent loop ────────────────────────────────────────────────────────
+      // ── Build initial prompt ──────────────────────────────────────────────
+      const userPromptParts = [
+        `Workspace: ${wsRoot}`,
+      ];
+      if (projectIntelligence) {
+        userPromptParts.push(`Project intelligence:\n${projectIntelligence}`);
+      }
+      userPromptParts.push(`File structure:\n${workspaceSnapshot}`);
+      userPromptParts.push(`Task: ${prompt}`);
+
       const messages: Message[] = [
         { role: "system", content: SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `Workspace root: ${wsRoot}\n\nWorkspace file structure:\n${workspaceSnapshot}\n\nTask: ${prompt}`,
-        },
+        { role: "user", content: userPromptParts.join("\n\n") },
       ];
 
-      const MAX_STEPS = 30;
+      // ── Execution tracking ────────────────────────────────────────────────
+      // These track what actually happened for evidence-based completion gates.
+      const filesWritten  = new Set<string>();
+      const commandsActuallyRun: string[] = [];
+      let   lastActionFailed  = false; // did the immediately preceding action fail?
+      let   consecutiveRepairs = 0;    // how many consecutive failures in a row?
+
+      const MAX_STEPS               = 25;
+      const MAX_CONSECUTIVE_REPAIRS = 3; // give up the repair loop after this many
       let step = 0;
       let consecutiveParseFailures = 0;
       let lastSummary = "Agent reached maximum steps without completing the task.";
       let completion: TaskCompletion | undefined;
 
+      // ── Agent loop ────────────────────────────────────────────────────────
       while (step < MAX_STEPS) {
         if (isTaskCancelled(taskId)) {
           logger.info({ taskId, step }, "Task cancelled by user");
-          emit(taskId, "status", "Task cancelled by user.");
+          emit(taskId, "status", "Cancelled by user.");
           updateTaskStatus(taskId, "error", "Cancelled by user.", undefined, {
             title: "Task cancelled",
             detail: "The task was stopped by the user.",
@@ -425,8 +554,6 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         }
 
         step++;
-        logger.debug({ taskId, step, maxSteps: MAX_STEPS }, "Agent step");
-        emit(taskId, "status", `Step ${step}/${MAX_STEPS}`);
 
         // ── Model call ──────────────────────────────────────────────────────
         let responseText = "";
@@ -439,23 +566,20 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
           logger.debug({ taskId, step, responseLength: responseText.length }, "Model response received");
         } catch (err) {
           if (isTaskCancelled(taskId)) {
-            emit(taskId, "status", "Task cancelled during model call.");
+            emit(taskId, "status", "Cancelled during model call.");
             updateTaskStatus(taskId, "error", "Cancelled by user", undefined, {
               title: "Task cancelled",
-              detail: "The task was stopped during a model call.",
+              detail: "Stopped during a model call.",
               step: `step_${step}`,
               category: "cancelled",
             });
             broadcastTaskUpdate(task);
             return;
           }
-
           const isModelError = err instanceof ModelError;
           failTask(taskId, task, `Model error at step ${step}: ${isModelError ? err.message : String(err)}`, {
             title: isModelError ? err.message : "AI model call failed",
-            detail: isModelError
-              ? `Category: ${err.category}\nTechnical: ${err.technical}`
-              : String(err),
+            detail: isModelError ? `Category: ${err.category}\nTechnical: ${err.technical}` : String(err),
             step: `step_${step}_model_call`,
             category: "model",
           });
@@ -464,7 +588,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
 
         messages.push({ role: "assistant", content: responseText });
 
-        // ── Response normalization + parse ──────────────────────────────────
+        // ── Response normalization ──────────────────────────────────────────
         const normalized = normalizeModelResponse(responseText);
 
         if (!normalized.ok) {
@@ -477,7 +601,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
             `Normalize failed [${reason}]`
           );
 
-          const failMsg = `Response normalization failed [${reason}] (attempt ${consecutiveParseFailures}/${MAX_CONSECUTIVE_PARSE_FAILURES}).\n${detail}`;
+          const failMsg = `Response parse failed [${reason}] (attempt ${consecutiveParseFailures}/${MAX_CONSECUTIVE_PARSE_FAILURES}).\n${detail}`;
           emit(taskId, "error", failMsg);
 
           if (consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
@@ -495,7 +619,6 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
           continue;
         }
 
-        // ── Normalization succeeded ─────────────────────────────────────────
         consecutiveParseFailures = 0;
 
         const { action, method, warning } = normalized;
@@ -508,9 +631,12 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
 
         const actionType = String(action["action"] ?? "");
 
+        // ── Emit stage label before executing ──────────────────────────────
+        emitStage(taskId, step, MAX_STEPS, actionType, action, lastActionFailed);
+
         // ── Done action ─────────────────────────────────────────────────────
         if (actionType === "done") {
-          const summary = String(action["summary"] ?? "Task complete.");
+          const summary     = String(action["summary"] ?? "Task complete.");
           const changedFiles = Array.isArray(action["changed_files"])
             ? (action["changed_files"] as unknown[]).map(String)
             : [];
@@ -522,14 +648,40 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
             : "complete";
           const remaining = String(action["remaining"] ?? "");
 
-          completion = { summary, changed_files: changedFiles, commands_run: commandsRun, final_status: finalStatus, remaining };
+          // ── Evidence cross-check ────────────────────────────────────────
+          // Compare what the agent CLAIMS it changed vs. what was ACTUALLY written.
+          // Log a warning if there's a discrepancy but don't block the completion.
+          const unclaimedWrites = [...filesWritten].filter(f => !changedFiles.includes(f));
+          const phantomClaims   = changedFiles.filter(f => filesWritten.size > 0 && !filesWritten.has(f));
+
+          if (unclaimedWrites.length > 0) {
+            logger.warn({ taskId, unclaimedWrites }, "Agent did not list all written files in done.changed_files");
+            emit(taskId, "status", `Note: unclaimed file writes: ${unclaimedWrites.join(", ")}`);
+          }
+          if (phantomClaims.length > 0) {
+            logger.warn({ taskId, phantomClaims }, "Agent claimed files in done.changed_files that were never written");
+          }
+
+          // Use actual tracked data to augment claimed lists
+          const mergedChangedFiles = [...new Set([...changedFiles, ...unclaimedWrites])];
+          const mergedCommandsRun  = commandsActuallyRun.length > 0
+            ? [...new Set([...commandsRun, ...commandsActuallyRun])]
+            : commandsRun;
+
+          completion = {
+            summary,
+            changed_files: mergedChangedFiles,
+            commands_run:  mergedCommandsRun,
+            final_status:  finalStatus,
+            remaining,
+          };
           lastSummary = summary;
 
-          logger.info({ taskId, step, finalStatus, changedFiles, commandsRun }, "Task completed with done action");
+          logger.info({ taskId, step, finalStatus, mergedChangedFiles, mergedCommandsRun }, "Task completed");
           emit(taskId, "done", summary, {
-            changed_files: changedFiles,
-            commands_run: commandsRun,
-            final_status: finalStatus,
+            changed_files: mergedChangedFiles,
+            commands_run:  mergedCommandsRun,
+            final_status:  finalStatus,
             remaining,
           });
           break;
@@ -541,10 +693,10 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         const result = await executeAction(action, taskId, signal);
 
         if (isTaskCancelled(taskId)) {
-          emit(taskId, "status", "Task cancelled.");
+          emit(taskId, "status", "Cancelled.");
           updateTaskStatus(taskId, "error", "Cancelled by user", undefined, {
             title: "Task cancelled",
-            detail: "The task was stopped after an action completed.",
+            detail: "Stopped after an action completed.",
             step: `step_${step}_${actionType}`,
             category: "cancelled",
           });
@@ -552,18 +704,71 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
           return;
         }
 
-        messages.push({
-          role: "user",
-          content: result.success
-            ? `Result: ${result.output}`
-            : `ERROR: ${result.output}\nAnalyze this error and try a different approach.`,
-        });
+        // ── Update execution tracking ───────────────────────────────────────
+        if (actionType === "write_file" && result.success) {
+          filesWritten.add(String(action["path"] ?? ""));
+          // After a successful write, invalidate the project index so the next
+          // task sees the updated file metadata (recency, size).
+          invalidateProjectIndex();
+        }
+
+        if (actionType === "run_command") {
+          commandsActuallyRun.push(String(action["command"] ?? ""));
+        }
+
+        // ── Repair tracking ─────────────────────────────────────────────────
+        const prevFailed = lastActionFailed;
+        lastActionFailed = !result.success;
+
+        if (!result.success) {
+          consecutiveRepairs++;
+          if (consecutiveRepairs >= MAX_CONSECUTIVE_REPAIRS) {
+            // Force the agent toward a graceful partial completion rather than
+            // continuing to spin on a broken repair loop.
+            logger.warn({ taskId, step, consecutiveRepairs }, "Too many consecutive failures — injecting repair-limit nudge");
+            messages.push({
+              role: "user",
+              content: `ERROR: ${result.output}\n\nThis is the ${consecutiveRepairs}rd consecutive failure. You are close to the repair limit. If this cannot be fixed in one more attempt, call done with final_status "partial" and explain exactly what failed in the remaining field.`,
+            });
+            continue;
+          }
+        } else {
+          consecutiveRepairs = 0;
+        }
+
+        // ── Build tool result message for the model ─────────────────────────
+        let resultMsg: string;
+        if (result.success) {
+          resultMsg = `Result: ${result.output}`;
+          // After a write_file, prompt the agent to verify
+          if (actionType === "write_file") {
+            resultMsg += "\n\nIMPORTANT: You wrote a file. Now VERIFY this change is correct — run a build/lint/type-check command or read the file back before calling done.";
+          }
+        } else {
+          const repairHint = prevFailed
+            ? `\nThis is failure #${consecutiveRepairs}. Think [REPAIRING] about what specifically went wrong and try a different approach.`
+            : `\nAnalyse this error carefully. Use think [REPAIRING] to diagnose the root cause before retrying.`;
+          resultMsg = `ERROR: ${result.output}${repairHint}`;
+        }
+
+        messages.push({ role: "user", content: resultMsg });
       }
 
+      // ── Step limit reached ────────────────────────────────────────────────
       if (step >= MAX_STEPS && !completion) {
         logger.warn({ taskId, step }, "Reached maximum step limit");
-        emit(taskId, "status", "Reached maximum steps (30). Stopping.");
-        lastSummary = "Reached maximum step limit (30). Task may be partially complete.";
+        emit(taskId, "status", `Reached step limit (${MAX_STEPS}). Stopping.`);
+        lastSummary = `Reached step limit (${MAX_STEPS}). Task may be partially complete.`;
+        // Attach actual tracked data to the partial completion
+        if (filesWritten.size > 0 || commandsActuallyRun.length > 0) {
+          completion = {
+            summary: lastSummary,
+            changed_files: [...filesWritten],
+            commands_run:  commandsActuallyRun,
+            final_status:  "partial",
+            remaining:     "Hit the step limit before task was verified complete.",
+          };
+        }
       }
 
       logger.info({ taskId, lastSummary, hasCompletion: !!completion }, "Task finished");

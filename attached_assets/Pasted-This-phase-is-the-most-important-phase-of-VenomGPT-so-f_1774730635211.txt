@@ -1,0 +1,222 @@
+This phase is the most important phase of VenomGPT so far.
+
+The target is not broad feature expansion.
+The target is to push VenomGPT toward the practical feel of a dependable execution-oriented coding agent, closer to Replit’s behavior:
+
+- understand the task
+- make the right change
+- verify the result
+- repair if needed
+- hand back grounded evidence
+
+## Context
+
+VenomGPT already has:
+- working local-first architecture
+- workspace-scoped file operations
+- command execution
+- parser/response normalization hardening
+- Z.AI multi-lane routing (PAAS + Anthropic-compatible)
+- automatic model selection and fallback
+- task lifecycle UI fixes
+- local validation success on conversational, file, command, and cleanup tasks
+
+The current weakness is no longer “basic functionality.”
+The current weakness is **execution excellence and project intelligence**.
+
+## Job
+
+Implement a focused **Agent Execution Excellence + Project Intelligence** pass.
+
+Do not stop at analysis.
+Do not turn this into feature sprawl.
+Make real code changes, run real verification, and report real results.
+
+---
+
+# Part 1 — Agent Execution Excellence
+
+## Goals
+- improve task completion confidence
+- strengthen self-verification after edits and commands
+- improve repair-after-failure behavior
+- reduce shallow “done” responses
+- make completion evidence-based, not vibe-based
+- make VenomGPT feel more like a dependable coding agent than a task router
+
+## Requirements
+
+### 1) Stronger task ownership
+The agent should track:
+- what the user asked for
+- what has already been done
+- what remains
+- whether the requested end state has actually been achieved
+
+Avoid weak flows where the system performs actions but does not truly establish completion.
+
+### 2) Evidence-based completion
+A task should not be marked complete unless the system has grounded evidence such as:
+- files changed
+- command output
+- verification result
+- final state inspection
+
+The completion summary must reflect real evidence, not generic success phrasing.
+
+### 3) Verification-first behavior
+For edit and command tasks:
+- verify the result explicitly
+- compare observed state against requested state
+- if mismatch exists, try to repair once or more within reasonable bounded limits
+- only then mark done or fail honestly
+
+### 4) Better repair loop
+If the first attempt is wrong:
+- inspect what happened
+- repair intelligently
+- avoid blind repetition
+- avoid premature failure when the issue is obviously fixable
+- avoid false success
+
+### 5) Better step discipline
+Reduce unnecessary wandering.
+The system should not read or inspect more than needed for a task.
+It should still be safe and grounded, but more selective and efficient.
+
+### 6) More useful execution feed
+Improve the user-visible execution narration so it feels closer to a professional agent workflow.
+
+Requirements:
+- show short grounded progress updates
+- tie updates to real task states
+- use stage language like:
+  - inspecting
+  - editing
+  - verifying
+  - repairing
+  - done
+- do not generate filler text
+- do not over-chat
+- make the feed useful for trust and debugging
+
+---
+
+# Part 2 — Project Intelligence
+
+## Goals
+- improve speed and relevance selection on larger workspaces
+- reduce token waste
+- avoid scanning irrelevant or huge directories
+- improve file targeting before edits begin
+
+## Requirements
+
+### 1) Workspace indexing strategy
+Add a bounded project intelligence layer that helps the agent understand the workspace more efficiently.
+
+This may include:
+- file inventory
+- lightweight file metadata
+- recently changed files
+- likely relevant files per task
+- directory-level summaries
+- cached workspace map
+
+Do not overbuild a full code intelligence engine if not needed yet.
+Build the smallest architecture-consistent version that materially improves task efficiency.
+
+### 2) Ignore / exclusion rules
+The system must avoid wasting effort on obvious low-value paths unless explicitly asked.
+
+Examples:
+- node_modules
+- dist
+- build
+- .git
+- large generated outputs
+- binary blobs
+- other heavy irrelevant folders
+
+This should be configurable and architecture-consistent.
+
+### 3) Better relevance selection
+Before reading many files, the system should make a stronger first-pass guess about which files are likely relevant to the user’s request.
+
+The goal is:
+- fewer unnecessary file reads
+- lower token usage
+- faster task startup
+- more focused execution
+
+### 4) Safe caching / reuse
+Where appropriate, introduce safe caching or context reuse mechanisms for:
+- workspace summaries
+- file metadata
+- recent task context
+- previously inspected file info
+
+Do not create stale-state bugs.
+Do not cache aggressively without invalidation logic.
+
+### 5) Token-efficiency awareness
+The system should become more intentional about context size and repeated reads.
+This phase should reduce waste, not just add features.
+
+---
+
+# Part 3 — Guardrails
+
+## Do NOT spend this phase on:
+- broad image generation productization
+- audio/video expansion
+- MCP ecosystem expansion for its own sake
+- visual redesign unrelated to execution quality
+- large provider-surface expansion
+- speculative features not tied to execution excellence or project intelligence
+
+## Visual analysis note
+Screenshot analysis / image-heavy frontend debugging is important, but it is not the core target of this phase.
+Do not make it the main scope here.
+
+---
+
+# Verification required
+
+You must verify with real local runs and report exact behavior.
+
+At minimum, test these:
+
+1. conversational task (`hi`)
+2. basic file creation task
+3. multi-step file edit task
+4. command task with explicit verification
+5. cleanup task that requires deciding what to keep vs remove
+6. task where the first attempt is wrong and repair is needed
+7. task on a larger or noisier workspace where ignore/relevance selection matters
+8. confirm that user-visible execution feed reflects real stages
+9. confirm that completion summaries are grounded in evidence
+
+Also report whether:
+- file-reading behavior became more selective
+- step counts decreased on comparable tasks
+- command verification became more reliable
+- project-scale latency improved in a meaningful way
+
+---
+
+# Final response format
+
+1. What I changed
+2. Why this phase was needed
+3. How execution excellence works now
+4. How verification/repair works now
+5. How project intelligence works now
+6. How ignore/relevance/caching work now
+7. How the execution feed changed
+8. Files changed
+9. Verification performed
+10. Remaining risks / not yet solved
+
+Do not stop at analysis.
+Make the code changes, run the verification, and report the real results.
