@@ -11,16 +11,53 @@ import { broadcastTaskUpdate } from "../lib/wsServer.js";
 
 const router: IRouter = Router();
 
+// ─── Image validation ─────────────────────────────────────────────────────────
+
+const MAX_IMAGES           = 5;
+const MAX_IMAGE_BYTES      = 6 * 1024 * 1024; // 6 MB per image (base64 overhead ~33%)
+const ALLOWED_IMAGE_PREFIXES = ["data:image/", "https://"];
+
+function validateImages(raw: unknown): { images: string[]; error?: string } {
+  if (raw === undefined || raw === null) return { images: [] };
+  if (!Array.isArray(raw))              return { images: [], error: "images must be an array" };
+  if (raw.length > MAX_IMAGES)          return { images: [], error: `at most ${MAX_IMAGES} images allowed per task` };
+
+  const images: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i];
+    if (typeof item !== "string") {
+      return { images: [], error: `images[${i}] must be a string` };
+    }
+    const ok = ALLOWED_IMAGE_PREFIXES.some(p => item.startsWith(p));
+    if (!ok) {
+      return { images: [], error: `images[${i}] must be a data URL (data:image/...) or https:// URL` };
+    }
+    if (item.startsWith("data:") && item.length > MAX_IMAGE_BYTES * (4 / 3)) {
+      return { images: [], error: `images[${i}] exceeds the 6 MB size limit` };
+    }
+    images.push(item);
+  }
+  return { images };
+}
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
+
 router.post("/agent/tasks", async (req, res) => {
-  const { prompt } = req.body as { prompt?: string };
+  const { prompt, images: rawImages } = req.body as { prompt?: string; images?: unknown };
 
   if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
     res.status(400).json({ error: "missing_prompt", message: "prompt is required" });
     return;
   }
 
+  const { images, error: imageError } = validateImages(rawImages);
+  if (imageError) {
+    res.status(400).json({ error: "invalid_images", message: imageError });
+    return;
+  }
+
   try {
-    const task = await runAgentTask(prompt.trim());
+    const task = await runAgentTask(prompt.trim(), images);
     res.json({ taskId: task.id, status: task.status });
   } catch (err) {
     res.status(400).json({ error: "agent_error", message: String(err) });

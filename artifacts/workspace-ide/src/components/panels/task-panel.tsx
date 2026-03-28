@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useStartAgentTask, useListAgentTasks } from '@workspace/api-client-react';
 import { useIdeStore, AgentLogEvent } from '@/store/use-ide-store';
 import { useGetWorkspace, useSetWorkspace } from '@workspace/api-client-react';
@@ -6,6 +6,7 @@ import {
   Bot, Sparkles, Send, Clock, CheckCircle2, Loader2, AlertCircle,
   X, ChevronDown, ChevronUp, Trash2, FolderOpen, Eye, Terminal,
   FileCheck, Zap, Settings, Search, FileEdit, Wrench, Activity,
+  Paperclip, ImageIcon,
 } from 'lucide-react';
 import { formatDistanceToNow, formatDuration, intervalToDuration } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
@@ -155,10 +156,25 @@ function RunningTaskBanner({
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
+const MAX_IMAGES = 5;
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // 6 MB
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
 export function TaskPanel() {
   const [prompt, setPrompt] = useState('');
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const startActiveTask   = useIdeStore(s => s.startActiveTask);
   const clearActiveTask   = useIdeStore(s => s.clearActiveTask);
@@ -178,6 +194,8 @@ export function TaskPanel() {
     mutation: {
       onSuccess: (data) => {
         setPrompt('');
+        setAttachedImages([]);
+        setImageError(null);
         startActiveTask(data.taskId);
         setExpandedTaskId(null);
         queryClient.invalidateQueries({ queryKey: getListAgentTasksQueryKey() });
@@ -197,8 +215,55 @@ export function TaskPanel() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim() || isPending || activeTaskId) return;
-    startTask({ data: { prompt: prompt.trim() } });
+    const payload: { prompt: string; images?: string[] } = { prompt: prompt.trim() };
+    if (attachedImages.length > 0) payload.images = attachedImages;
+    startTask({ data: payload });
   };
+
+  // ── Image helpers ────────────────────────────────────────────────────────
+  const addImages = useCallback(async (files: File[]) => {
+    setImageError(null);
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+    const remaining = MAX_IMAGES - attachedImages.length;
+    const toProcess = imageFiles.slice(0, remaining);
+    if (imageFiles.length > remaining) {
+      setImageError(`Max ${MAX_IMAGES} images. ${imageFiles.length - remaining} skipped.`);
+    }
+    const results: string[] = [];
+    for (const file of toProcess) {
+      if (file.size > MAX_IMAGE_BYTES) {
+        setImageError(`"${file.name}" exceeds 6 MB limit and was skipped.`);
+        continue;
+      }
+      try {
+        results.push(await fileToDataUrl(file));
+      } catch {
+        setImageError(`Could not read "${file.name}".`);
+      }
+    }
+    if (results.length > 0) setAttachedImages(prev => [...prev, ...results]);
+  }, [attachedImages.length]);
+
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageItems = items.filter(i => i.kind === 'file' && i.type.startsWith('image/'));
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+    const files = imageItems.map(i => i.getAsFile()).filter(Boolean) as File[];
+    await addImages(files);
+  }, [addImages]);
+
+  const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    await addImages(files);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [addImages]);
+
+  const removeImage = useCallback((index: number) => {
+    setAttachedImages(prev => prev.filter((_, i) => i !== index));
+    setImageError(null);
+  }, []);
 
   const handleCancel = async () => {
     if (!activeTaskId) return;
@@ -434,18 +499,33 @@ export function TaskPanel() {
       {/* ── Composer ────────────────────────────────────────────────────── */}
       <div className="border-t border-panel-border p-3 shrink-0 bg-background/20">
         <form onSubmit={handleSubmit} className="relative">
+
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handleFileInputChange}
+          />
+
+          {/* Textarea */}
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               isRunning
                 ? 'Agent is working…'
-                : 'Describe what you want to build or fix.\n⌘/Ctrl+Enter to submit.'
+                : 'Describe what you want to build or fix.\nPaste or attach screenshots • ⌘/Ctrl+Enter to submit.'
             }
-            className="w-full h-[104px] bg-background border border-panel-border rounded-xl p-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none transition-all"
+            className="w-full h-[96px] bg-background border border-panel-border rounded-xl p-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none transition-all"
             disabled={isRunning}
           />
+
+          {/* Send button */}
           <div className="absolute bottom-3 right-3">
             <button
               type="submit"
@@ -460,6 +540,63 @@ export function TaskPanel() {
             </button>
           </div>
         </form>
+
+        {/* Image error */}
+        {imageError && (
+          <p className="mt-1 text-[11px] text-amber-400 flex items-center gap-1">
+            <AlertCircle className="w-3 h-3 shrink-0" />
+            {imageError}
+          </p>
+        )}
+
+        {/* Image thumbnail strip */}
+        {attachedImages.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {attachedImages.map((src, i) => (
+              <div key={i} className="relative group">
+                <img
+                  src={src}
+                  alt={`attachment ${i + 1}`}
+                  className="h-12 w-12 object-cover rounded-lg border border-panel-border"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(i)}
+                  className="absolute -top-1 -right-1 w-4 h-4 bg-background border border-panel-border rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Remove image"
+                >
+                  <X className="w-2.5 h-2.5 text-muted-foreground" />
+                </button>
+              </div>
+            ))}
+            {attachedImages.length < MAX_IMAGES && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="h-12 w-12 border border-dashed border-panel-border rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+                title="Add image"
+              >
+                <ImageIcon className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Attach button row (only visible when no images yet + not running) */}
+        {attachedImages.length === 0 && !isRunning && (
+          <div className="mt-1.5 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              title="Attach screenshots"
+            >
+              <Paperclip className="w-3 h-3" />
+              Attach screenshots
+            </button>
+            <span className="text-[10px] text-muted-foreground/50">or paste</span>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -38,6 +38,12 @@ export interface ModelProvider {
     onChunk: (text: string) => void,
     options?: ChatOptions
   ): Promise<ModelResponse>;
+  /**
+   * Returns true if this provider can handle vision (image_url) messages.
+   * Z.AI always has glm-4.6v on the PAAS lane.
+   * Replit OpenAI integration does not expose a vision model.
+   */
+  isVisionCapable(): boolean;
 }
 
 export type { ModelSelectionHint };
@@ -280,6 +286,11 @@ function messagesToAnthropic(messages: Message[]): {
   const nonSystem = messages.filter((m) => m.role !== "system");
   const converted: AnthropicRequestMessage[] = nonSystem.map((m) => ({
     role: m.role as "user" | "assistant",
+    // INTENTIONAL: image_url parts are stripped here. Vision tasks are routed to
+    // the PAAS lane (glm-4.6v) exclusively — the Anthropic lane models do not
+    // support vision. The visual analysis is converted to plain text before being
+    // forwarded to any Anthropic-lane call. If Anthropic-lane vision support is
+    // added in future, this filter must be updated to emit Anthropic image blocks.
     content: typeof m.content === "string"
       ? m.content
       : m.content
@@ -609,6 +620,12 @@ class ZaiProvider implements ModelProvider {
         throw categorizeError(err);
       }
     }, "chat");
+  }
+
+  isVisionCapable(): boolean {
+    // Replit AI integration does not expose a vision-capable model.
+    // Z.AI always has glm-4.6v / glm-4.6v-flash on the PAAS lane.
+    return this.config.name === "zai";
   }
 
   async chatStream(

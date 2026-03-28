@@ -329,6 +329,14 @@ components:
         prompt:
           type: string
           description: Natural language task description
+        images:
+          type: array
+          items:
+            type: string
+          description: >
+            Optional list of image attachments. Each item must be a data URL
+            (data:image/png;base64,...) or an https:// URL. Used for
+            screenshot-driven and image-assisted coding tasks.
       required:
         - prompt
 

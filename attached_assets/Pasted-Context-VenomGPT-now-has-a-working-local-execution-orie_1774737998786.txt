@@ -1,0 +1,163 @@
+Context
+
+VenomGPT now has a working local execution-oriented coding assistant baseline.
+
+The project is no longer in a vague MVP stage.
+
+What is already working in meaningful local validation includes:
+
+* file creation and modification tasks
+* multi-file task handling
+* conversational prompt handling without the earlier parse-loop behavior
+* command execution success in local validation
+* stronger Z.AI routing correctness
+* clearer provider diagnostics
+* better task lifecycle stability in the UI
+
+So this pass is not about generic hardening, broad feature growth, or theoretical planning.
+
+The next highest-value gap is this:
+
+VenomGPT still does not have a strong, trustworthy multimodal intake path for screenshot-driven and image-based coding tasks.
+
+Right now, the system is materially stronger on text/coding tasks than on tasks that begin from visual evidence such as:
+
+* a frontend screenshot
+* a UI defect screenshot
+* a layout/alignment problem image
+* a screenshot of an application error state
+* an image plus a short instruction like “fix this UI issue”
+
+Job
+
+Audit the current repository and implement a bounded but real Phase 06 pass for:
+
+Visual Analysis + Rich Multimodal Task Intake
+
+Do not stop at analysis.
+
+Make the code changes.
+
+What this phase is trying to achieve
+
+This phase should make VenomGPT materially better at handling coding-related tasks whose primary input is visual, especially screenshots.
+
+The goal is not generic image captioning.
+
+The goal is not image generation.
+
+The goal is not broad multimedia expansion.
+
+The goal is to make screenshot-driven and image-assisted coding tasks enter the system correctly, route correctly, and produce grounded, useful analysis for debugging, UI inspection, and task planning.
+
+Required outcomes
+
+1. Add or improve multimodal task intake so the system can recognize and structure tasks that include screenshots or images, not only plain text.
+
+2. Distinguish visual task types in a useful way, such as:
+
+   * screenshot-based UI issue
+   * frontend/layout defect
+   * image-assisted debugging task
+   * mixed text + image coding request
+
+3. Ensure routing/capability selection for these tasks is provider-aware and capability-aware, rather than brittle or hardcoded in a way that assumes one provider path always supports vision.
+
+4. Produce useful visual-analysis outputs for coding work, not generic image descriptions. The system should be able to surface things like:
+
+   * likely visible UI defects
+   * layout/alignment problems
+   * suspicious states visible in the screenshot
+   * ambiguity where the image is insufficient
+   * likely code areas or component areas to inspect next
+
+5. Preserve the current execution-oriented architecture and working text/coding paths. This phase must extend the system, not destabilize what already works.
+
+6. Improve result honesty. The system must clearly separate:
+
+   * what is visibly present in the image
+   * what is inferred
+   * what still needs repo inspection or execution validation
+
+What to inspect and fix
+
+Inspect the current codebase for all of the following areas and implement the missing work where needed:
+
+* task intake / request normalization
+* attachment or image handling path
+* task classification logic
+* model/provider capability registry
+* routing decisions for multimodal tasks
+* agent prompt construction for image-assisted tasks
+* UI handling of screenshot-driven requests if needed
+* backend request shaping for multimodal model calls
+* result formatting and evidence reporting
+* graceful fallback behavior when vision is unavailable on the selected provider/model path
+
+Implementation requirements
+
+1. Keep the implementation architecture-consistent with the current codebase.
+
+2. Do not implement this as shallow demo logic or fake “vision support” labeling.
+
+3. Do not add broad image generation features.
+
+4. Do not expand into audio/video.
+
+5. Do not spend this pass on cosmetic redesign unrelated to multimodal task quality.
+
+6. If the current provider abstraction is too brittle for multimodal handling, improve it in a bounded way so vision-capable and non-vision-capable paths are handled cleanly.
+
+7. Ensure the system fails honestly when multimodal capability is unavailable, instead of pretending an image was meaningfully analyzed.
+
+8. If screenshot/image input requires schema changes, request-shaping changes, or UI payload changes, make those real changes.
+
+9. If prompt construction for the coding agent needs a multimodal-specific path, implement it.
+
+10. Preserve or improve logging/diagnostics so multimodal routing decisions are inspectable during local debugging.
+
+Verification requirements
+
+You must verify with real evidence, not just claims.
+
+At minimum, verify using realistic local test flows covering as many of these as possible:
+
+1. A screenshot-driven UI issue task
+2. A mixed text + screenshot task
+3. A task where the selected route supports multimodal handling
+4. A task where the selected route does not support multimodal handling and the system fails or falls back honestly
+5. A task showing that existing text-only flows still work after the changes
+
+Show concrete proof through code, logs, payload handling, task behavior, or local run results.
+
+Do not say “done” unless you have actually validated the implemented path.
+
+Explicitly not this phase
+
+Do not turn this into:
+
+* broad feature-count expansion
+* image generation productization
+* audio/video capability work
+* generic brainstorming about future multimodal possibilities
+* architecture fantasy without implementation
+* analysis-only output
+
+Final response format
+
+Respond in this structure:
+
+1. Summary of what you changed
+2. Files changed and why
+3. Multimodal intake flow now implemented
+4. Routing/capability changes now implemented
+5. What was verified locally
+6. What remains limited or not yet verified
+7. Exact commands run
+8. Any follow-up risk that should be handled in the next bounded phase
+
+Important instruction
+
+Do not stop at analysis.
+Do not leave this as a plan.
+Implement the phase and verify it with real evidence.

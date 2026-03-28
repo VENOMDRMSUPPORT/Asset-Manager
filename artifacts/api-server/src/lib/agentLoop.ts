@@ -1,4 +1,4 @@
-import { getModelProvider, ModelError, type Message } from "./modelAdapter.js";
+import { getModelProvider, ModelError, type Message, type MessageContentPart } from "./modelAdapter.js";
 import { normalizeModelResponse, buildRetryInstruction, type NormalizeFailureReason } from "./responseNormalizer.js";
 import { listDirectory, readFile, writeFile } from "./fileTools.js";
 import { runCommand } from "./terminal.js";
@@ -388,11 +388,104 @@ async function executeAction(
   }
 }
 
+// ─── Visual task classification ───────────────────────────────────────────────
+
+interface VisualTaskMeta {
+  isVisual:   boolean;
+  imageCount: number;
+}
+
+function classifyTask(images: string[]): VisualTaskMeta {
+  return { isVisual: images.length > 0, imageCount: images.length };
+}
+
+// ─── Visual analysis (phase 1 of multimodal tasks) ───────────────────────────
+//
+// When images are attached, this function calls the vision model (glm-4.6v on
+// the PAAS lane) BEFORE the main agentic loop.  The resulting analysis is
+// plain text that gets prepended to the main agent's user context — so the
+// agentic model (glm-5.1, Anthropic lane) never receives raw image data.
+//
+// This two-phase design lets the best vision model handle image understanding
+// while the best coding model handles planning + execution.
+
+const VISION_ANALYSIS_SYSTEM = `You are a precise visual analysis assistant for a software developer.
+Your job is to extract coding-relevant observations from screenshots or images.
+Be specific about what is VISIBLE. Do not guess or hallucinate.
+Separate what is observed from what is inferred.`;
+
+async function analyzeVisualContext(
+  model:     ReturnType<typeof getModelProvider>,
+  images:    string[],
+  userPrompt: string,
+  taskId:    string
+): Promise<string> {
+  const imageCount = images.length;
+  const countLabel = imageCount > 1 ? `${imageCount} screenshots` : "this screenshot";
+
+  emit(taskId, "status", `Analyzing ${countLabel} with vision model…`);
+  logger.info({ taskId, imageCount }, "[VenomGPT] Starting visual analysis phase");
+
+  const imageParts: MessageContentPart[] = images.map(url => ({
+    type:      "image_url",
+    image_url: { url },
+  }));
+
+  const promptText = `Developer task: "${userPrompt}"
+
+Analyze ${countLabel} and provide a structured visual inspection report for a developer:
+
+## 1. VISIBLE STATE
+Describe exactly what is shown — UI components, layout, text content, error messages, code visible on screen, terminal output, or anything else visible.
+
+## 2. VISIBLE DEFECTS
+List every observable problem: layout misalignments, truncated/overlapping content, error states, broken styles, wrong colors, empty states that should have content, incorrect text, etc. Be specific — name the component or area.
+
+## 3. RELEVANT CODE AREAS
+Based on what you see, identify which component types, file patterns, or UI layer is likely responsible. Be specific where you can (e.g. "the navigation sidebar", "the data table pagination", "the error boundary").
+
+## 4. TASK RELEVANCE
+Directly relate what you see to the developer's task. What specifically in the screenshot needs to change to satisfy the task?
+
+## 5. AMBIGUITIES / LIMITS
+What cannot be determined from the image alone? What would require reading the actual source code to understand?
+
+Ground every observation in what is VISIBLY PRESENT. If an area is outside the screenshot, say so.`;
+
+  const analysisMessages: Message[] = [
+    { role: "system", content: VISION_ANALYSIS_SYSTEM },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: promptText },
+        ...imageParts,
+      ],
+    },
+  ];
+
+  const result = await model.chat(analysisMessages, {
+    maxTokens:  2000,
+    taskHint:   "vision",
+  });
+
+  logger.info(
+    { taskId, analysisLength: result.content.length, model: result.modelUsed, lane: result.laneUsed },
+    "[VenomGPT] Visual analysis complete"
+  );
+
+  // Emit a truncated preview so the operator can see the analysis in the feed
+  const preview = result.content.slice(0, 400) + (result.content.length > 400 ? "…" : "");
+  emit(taskId, "thought", `[INSPECTING] Visual analysis (${result.modelUsed ?? "vision model"}):\n${preview}`);
+
+  return result.content;
+}
+
 // ─── Main task runner ─────────────────────────────────────────────────────────
 
-export async function runAgentTask(prompt: string): Promise<AgentTask> {
-  const task   = createTask(prompt);
-  const taskId = task.id;
+export async function runAgentTask(prompt: string, images: string[] = []): Promise<AgentTask> {
+  const taskMeta = classifyTask(images);
+  const task     = createTask(prompt);
+  const taskId   = task.id;
   createTaskController(taskId);
 
   broadcastTaskUpdate(task);
@@ -509,6 +602,52 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         return;
       }
 
+      // ── Multimodal intake (phase 1: visual analysis) ──────────────────────
+      // If the task includes images, run them through the vision model first.
+      // The visual analysis output is then injected as context for the agentic
+      // model — which never sees raw image data (it receives structured text).
+      let visualContext = "";
+      if (taskMeta.isVisual) {
+        emit(taskId, "status", `Visual task — ${taskMeta.imageCount} image${taskMeta.imageCount > 1 ? "s" : ""} attached`);
+        logger.info({ taskId, imageCount: taskMeta.imageCount }, "[VenomGPT] Visual task detected");
+
+        if (!model.isVisionCapable()) {
+          failTask(taskId, task, "Vision model unavailable on current provider", {
+            title: "Vision analysis not available",
+            detail: [
+              "This task includes screenshot attachments, but the current AI provider does not support vision.",
+              "",
+              "To enable multimodal tasks:",
+              "  1. Get a Z.AI API key at https://z.ai/manage-apikey/apikey-list",
+              "  2. Add ZAI_API_KEY=your_key to your .env file",
+              "  3. Restart the server",
+              "",
+              "Z.AI provides glm-4.6v (vision) + glm-5.1 (coding) — both needed for screenshot-driven tasks.",
+            ].join("\n"),
+            step: "vision_capability_check",
+            category: "model",
+          });
+          return;
+        }
+
+        try {
+          visualContext = await analyzeVisualContext(model, images, prompt, taskId);
+        } catch (err) {
+          const isModelError = err instanceof ModelError;
+          failTask(taskId, task, `Visual analysis failed: ${isModelError ? err.message : String(err)}`, {
+            title: isModelError ? err.message : "Visual analysis failed",
+            detail: isModelError
+              ? `Category: ${err.category}\nTechnical: ${err.technical}`
+              : String(err),
+            step: "visual_analysis",
+            category: "model",
+          });
+          return;
+        }
+
+        emit(taskId, "status", "Visual analysis complete — proceeding with code execution…");
+      }
+
       // ── Build initial prompt ──────────────────────────────────────────────
       const userPromptParts = [
         `Workspace: ${wsRoot}`,
@@ -517,6 +656,19 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
         userPromptParts.push(`Project intelligence:\n${projectIntelligence}`);
       }
       userPromptParts.push(`File structure:\n${workspaceSnapshot}`);
+
+      // Visual context is injected between workspace context and the task
+      if (visualContext) {
+        userPromptParts.push(
+          `Visual context (from screenshot analysis):\n` +
+          `The developer attached ${taskMeta.imageCount} screenshot${taskMeta.imageCount > 1 ? "s" : ""}. ` +
+          `The following visual analysis was produced by a vision model before this coding session:\n\n` +
+          visualContext +
+          `\n\nUse this visual evidence to guide your code changes. ` +
+          `Ground your actions in what is VISIBLE above, not assumptions.`
+        );
+      }
+
       userPromptParts.push(`Task: ${prompt}`);
 
       const messages: Message[] = [

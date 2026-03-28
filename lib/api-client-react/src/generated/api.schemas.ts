@@ -54,6 +54,11 @@ export interface WriteFileRequest {
 export interface StartTaskRequest {
   /** Natural language task description */
   prompt: string;
+  /**
+   * Optional image attachments as data URLs (data:image/png;base64,...) or
+   * https:// URLs. Used for screenshot-driven and image-assisted coding tasks.
+   */
+  images?: string[];
 }
 
 export interface TaskStartResponse {
