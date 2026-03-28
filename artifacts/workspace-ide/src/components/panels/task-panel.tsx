@@ -156,14 +156,46 @@ function RunningTaskBanner({
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
-const MAX_IMAGES = 5;
-const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // 6 MB
+const MAX_IMAGES           = 5;
+// Source-file cap before compression — reject files too large to even load.
+// After JPEG compression the payload will be far smaller.
+const MAX_SOURCE_BYTES     = 20 * 1024 * 1024; // 20 MB raw source limit
+// Target max dimension for the compressed image (width or height, whichever is larger).
+// 1280 px is sufficient for LLM vision analysis; larger sizes only waste bandwidth.
+const COMPRESS_MAX_DIM     = 1280;
+const COMPRESS_QUALITY     = 0.85; // JPEG quality
 
-function fileToDataUrl(file: File): Promise<string> {
+/**
+ * Compress an image file to a JPEG data URL.
+ * - Resizes so the longer side is at most COMPRESS_MAX_DIM px.
+ * - Encodes as JPEG at COMPRESS_QUALITY.
+ * A typical 1920×1080 PNG screenshot (1–3 MB) becomes ≈ 150–350 KB as base64.
+ */
+function compressImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+    reader.onerror = () => reject(new Error(`Could not read "${file.name}"`));
+    reader.onload = (loadEvt) => {
+      const dataUrl = loadEvt.target?.result as string;
+      const img = new Image();
+      img.onerror = () => reject(new Error(`Could not decode "${file.name}" as an image`));
+      img.onload  = () => {
+        // Calculate output dimensions
+        let { naturalWidth: w, naturalHeight: h } = img;
+        if (w > COMPRESS_MAX_DIM || h > COMPRESS_MAX_DIM) {
+          if (w >= h) { h = Math.round((h / w) * COMPRESS_MAX_DIM); w = COMPRESS_MAX_DIM; }
+          else        { w = Math.round((w / h) * COMPRESS_MAX_DIM); h = COMPRESS_MAX_DIM; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width  = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { reject(new Error("Canvas 2D context unavailable")); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", COMPRESS_QUALITY));
+      };
+      img.src = dataUrl;
+    };
     reader.readAsDataURL(file);
   });
 }
@@ -215,6 +247,22 @@ export function TaskPanel() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim() || isPending || activeTaskId) return;
+
+    // Pre-submit payload size check.
+    // Each compressed JPEG is typically 150–350 KB as base64.
+    // Total JSON body including prompt should stay well under 30 MB (server limit).
+    if (attachedImages.length > 0) {
+      const totalImageBytes = attachedImages.reduce((sum, s) => sum + s.length, 0);
+      const PAYLOAD_WARN_BYTES = 25 * 1024 * 1024; // 25 MB — give headroom under 30 MB limit
+      if (totalImageBytes > PAYLOAD_WARN_BYTES) {
+        setImageError(
+          `Total image payload (${Math.round(totalImageBytes / 1024 / 1024)} MB) is too large. ` +
+          `Remove some images and try again.`
+        );
+        return;
+      }
+    }
+
     const payload: { prompt: string; images?: string[] } = { prompt: prompt.trim() };
     if (attachedImages.length > 0) payload.images = attachedImages;
     startTask({ data: payload });
@@ -232,14 +280,16 @@ export function TaskPanel() {
     }
     const results: string[] = [];
     for (const file of toProcess) {
-      if (file.size > MAX_IMAGE_BYTES) {
-        setImageError(`"${file.name}" exceeds 6 MB limit and was skipped.`);
+      if (file.size > MAX_SOURCE_BYTES) {
+        setImageError(`"${file.name}" is too large (>${Math.round(MAX_SOURCE_BYTES / 1024 / 1024)} MB) and was skipped.`);
         continue;
       }
       try {
-        results.push(await fileToDataUrl(file));
-      } catch {
-        setImageError(`Could not read "${file.name}".`);
+        // Compress before storing — JPEG at 85% quality, max 1280px.
+        // A typical 1920×1080 screenshot drops from ~2 MB PNG to ~200 KB JPEG.
+        results.push(await compressImage(file));
+      } catch (err) {
+        setImageError(err instanceof Error ? err.message : `Could not process "${file.name}".`);
       }
     }
     if (results.length > 0) setAttachedImages(prev => [...prev, ...results]);

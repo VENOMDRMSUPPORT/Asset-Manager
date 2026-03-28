@@ -14,7 +14,10 @@ const router: IRouter = Router();
 // ─── Image validation ─────────────────────────────────────────────────────────
 
 const MAX_IMAGES           = 5;
-const MAX_IMAGE_BYTES      = 6 * 1024 * 1024; // 6 MB per image (base64 overhead ~33%)
+// Client-side JPEG compression (max 1280 px, 85 % quality) keeps real screenshots
+// well under 500 KB as base64.  4 MB is a generous server-side safety cap that
+// rejects maliciously-crafted payloads while never rejecting legitimate screenshots.
+const MAX_IMAGE_BYTES      = 4 * 1024 * 1024; // 4 MB per image
 const ALLOWED_IMAGE_PREFIXES = ["data:image/", "https://"];
 
 function validateImages(raw: unknown): { images: string[]; error?: string } {

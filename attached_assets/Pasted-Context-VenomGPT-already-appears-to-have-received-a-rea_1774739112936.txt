@@ -1,0 +1,164 @@
+Context
+
+VenomGPT already appears to have received a real Phase 06 implementation pass for screenshot attachment and multimodal task intake UX.
+
+There is now visible UI for screenshot attachment/paste in the task composer.
+
+However, the first real acceptance test exposed a blocking failure:
+
+Submitting a screenshot-driven task triggered:
+
+POST /api/agent/tasks
+HTTP/1.1 413 Payload Too Large
+
+This means the multimodal path is not yet acceptance-ready.
+
+The problem is not theoretical.
+
+The problem is not whether the UI exists.
+
+The problem is that real screenshot submission currently fails before the multimodal task can complete successfully.
+
+So this is not a new feature-expansion phase.
+
+This is a tightly scoped reliability fix pass for the already-started Phase 06 work.
+
+Job
+
+Audit and fix the multimodal submission path so screenshot-driven tasks can be submitted successfully in real local usage without breaking existing text-only behavior.
+
+Do not stop at analysis.
+
+Make the code changes.
+
+Primary problem to solve
+
+The current multimodal/screenshot task path is failing with 413 Payload Too Large during submission to /api/agent/tasks.
+
+You must identify the real cause and fix it properly.
+
+Do not patch this superficially.
+
+Do not hide the failure.
+
+Do not reduce the issue to UI-only behavior.
+
+Required outcomes
+
+1. Fix the screenshot submission path so at least one realistic screenshot can be submitted successfully in local use without triggering 413.
+
+2. Ensure the fix is architecture-consistent and works across the actual frontend-to-backend request path.
+
+3. Preserve text-only task submission behavior.
+
+4. Preserve honest failure behavior when images are unsupported for capability reasons.
+   This pass is about fixing transport/intake reliability, not faking vision success.
+
+5. If size limits are required, enforce them intentionally and clearly with good user-visible errors before submission when possible.
+
+6. If the correct solution requires changing transport format, request encoding, payload shape, image preprocessing, compression, resizing, or backend body limits, make those real changes.
+
+What to inspect and fix
+
+Audit the real end-to-end submission chain, including all relevant layers:
+
+* frontend attachment handling
+* image preview/state storage
+* request payload construction
+* API client request formatting
+* request content type and transport strategy
+* backend route body parsing / size limits
+* Express or middleware payload limits
+* any proxy/dev-server limits
+* any model-request shaping that unnecessarily inflates payload size
+* any duplicate/base64-heavy image representation that bloats the request
+* any mismatch between frontend-enforced limits and actual server acceptance limits
+
+You must determine exactly why the submitted screenshot produces 413 and fix the actual root cause.
+
+Implementation requirements
+
+1. Keep this pass tightly scoped to multimodal submission reliability.
+
+2. Do not redesign unrelated product areas.
+
+3. Do not start a new broad multimodal architecture pass.
+
+4. Do not remove screenshot support just to make the error disappear.
+
+5. Do not silently drop images while pretending the screenshot task was submitted correctly.
+
+6. If images are currently being serialized inefficiently, improve that path properly.
+
+7. If frontend-side resizing/compression is needed, implement it in a bounded, reliable way.
+
+8. If backend body-size limits are too low, adjust them intentionally and safely rather than blindly making them huge.
+
+9. If multiple safeguards are needed, implement them together:
+
+   * pre-submit validation
+   * efficient payload shaping
+   * backend acceptance sizing
+   * clear user-visible errors when limits are exceeded
+
+10. Preserve or improve logs/diagnostics so future multimodal submission failures are easier to debug.
+
+Verification requirements
+
+You must verify with real evidence, not claims.
+
+At minimum, verify all of the following:
+
+1. A text-only task still submits successfully after the fix.
+
+2. A screenshot-driven task with one realistic image submits successfully without 413.
+
+3. The backend receives and processes the request correctly.
+
+4. If there is still a size limit, an oversized image fails gracefully with a clear user-visible error before or during submission, not with a vague broken state.
+
+5. If multiple images are supported, verify at least one bounded multi-image case or explicitly explain why it remains limited.
+
+6. Show the exact evidence:
+
+   * relevant code changes
+   * request payload strategy
+   * logs
+   * local run results
+   * screenshots if useful
+   * exact commands run
+
+Important acceptance rule
+
+Do not say this is fixed unless you have actually re-run the real screenshot submission flow and confirmed that the 413 failure is gone for a realistic local test case.
+
+Explicitly not this pass
+
+Do not turn this into:
+
+* a brand-new multimodal phase
+* generic cleanup
+* image generation work
+* audio/video work
+* UI polish-only work
+* analysis without implementation
+* vague “I improved limits” claims without real proof
+
+Final response format
+
+Respond in this exact structure:
+
+1. Root cause of the 413 failure
+2. What you changed
+3. Files changed and why
+4. New payload/transport strategy
+5. What was verified locally
+6. Remaining limits or edge cases
+7. Exact commands run
+8. Whether the screenshot submission acceptance test now passes
+
+Important instruction
+
+Do not stop at analysis.
+Do not leave TODOs.
+Fix the real multimodal submission path and verify it with evidence.
