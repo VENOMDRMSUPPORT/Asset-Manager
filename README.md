@@ -1,4 +1,4 @@
-# DevMind AI — Local AI Coding Workspace
+# VenomGPT — AI Coding Workspace
 
 A browser-based personal AI coding assistant. Give it a task in plain English and it executes it end-to-end on your local codebase: reads files, edits code, runs commands, fixes errors, and reports results — without constant approval prompts.
 
@@ -194,7 +194,7 @@ The WebSocket endpoint is at `/api/ws`. Vite's dev proxy forwards WebSocket upgr
 ## Project Structure
 
 ```
-devmind-ai/
+venomgpt/
 ├── artifacts/
 │   ├── api-server/           # Express API + agent backend
 │   │   └── src/

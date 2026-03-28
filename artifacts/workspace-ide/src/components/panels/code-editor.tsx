@@ -19,7 +19,7 @@ export function CodeEditor() {
 
   useEffect(() => {
     if (monaco) {
-      monaco.editor.defineTheme('devmind-dark', {
+      monaco.editor.defineTheme('venomgpt-dark', {
         base: 'vs-dark',
         inherit: true,
         rules: [],
@@ -30,7 +30,7 @@ export function CodeEditor() {
           'editorLineNumber.activeForeground': '#71717a',
         },
       });
-      monaco.editor.setTheme('devmind-dark');
+      monaco.editor.setTheme('venomgpt-dark');
     }
   }, [monaco]);
 
@@ -97,7 +97,7 @@ export function CodeEditor() {
             path={activeFile.path}
             language={activeFile.language || 'plaintext'}
             value={activeFile.content}
-            theme="devmind-dark"
+            theme="venomgpt-dark"
             onChange={(value) => updateFileContent(activeFile.path, value ?? '')}
             onMount={handleEditorDidMount}
             options={{

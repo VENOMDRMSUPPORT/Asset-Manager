@@ -1,4 +1,4 @@
-# DevMind AI — Local AI Coding Workspace
+# VenomGPT — AI Coding Workspace
 
 ## Overview
 
@@ -33,7 +33,7 @@ Local Node.js Server (Express, artifacts/api-server)
   ├── Model Adapter (lib/modelAdapter.ts) → OpenAI-compatible (Replit integration or ZAI)
   ├── Agent Loop (lib/agentLoop.ts)    → orchestrates full task execution
   ├── Session Manager (lib/sessionManager.ts) → in-memory task storage, events (300-cap), failure details
-  ├── Task Persistence (lib/taskPersistence.ts) → saves/loads ~/.devmind/history.json (max 100 tasks)
+  ├── Task Persistence (lib/taskPersistence.ts) → saves/loads ~/.venomgpt/history.json (max 100 tasks); migrates from legacy ~/.devmind on first run
   ├── Project Index (lib/projectIndex.ts) → file relevance scoring (TTL 60s, min score 2, max 15 files)
   ├── Response Normalizer (lib/responseNormalizer.ts) → JSON extraction + repair (trailing commas, comments, BOM)
   └── WS Server (lib/wsServer.ts)     → WebSocket for real-time streaming
@@ -144,7 +144,7 @@ The UI surfaces failure details in:
 
 ## Task Persistence
 
-- Tasks are persisted to `~/.devmind/history.json` (configurable via `DEVMIND_DATA_DIR` env var)
+- Tasks are persisted to `~/.venomgpt/history.json` (canonical); configurable via `VENOMGPT_DATA_DIR` env var; `DEVMIND_DATA_DIR` accepted as a backward-compat alias
 - Max 100 tasks stored; loaded at server startup
 - Frontend hydrates events on historical task click via `hydrateTaskEvents()` (one-fetch-per-task via `taskLogsLoaded` Set)
 

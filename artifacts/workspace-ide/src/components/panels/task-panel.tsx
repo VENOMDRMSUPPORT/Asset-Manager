@@ -160,7 +160,7 @@ export function TaskPanel() {
       <div className="h-12 border-b border-panel-border flex items-center px-4 shrink-0 bg-background/50">
         <h2 className="text-sm font-semibold flex items-center gap-2 text-foreground">
           <Bot className="w-4 h-4 text-primary" />
-          AI Assistant
+          VenomGPT
         </h2>
         <div className="ml-auto flex items-center gap-1.5">
           <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />

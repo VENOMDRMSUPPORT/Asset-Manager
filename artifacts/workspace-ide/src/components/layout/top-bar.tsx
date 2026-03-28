@@ -58,7 +58,7 @@ export function TopBar() {
       <div className="flex items-center gap-3 min-w-0">
         <div className="flex items-center gap-2 text-primary font-bold tracking-tight shrink-0">
           <TerminalSquare className="w-5 h-5" />
-          <span>DevMind AI</span>
+          <span>VenomGPT</span>
         </div>
 
         <div className="w-px h-5 bg-panel-border mx-1 shrink-0" />

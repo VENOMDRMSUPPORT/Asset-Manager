@@ -18,7 +18,7 @@ export default function IDEPage() {
     return (
       <div className="h-screen w-screen bg-background flex flex-col items-center justify-center text-primary">
         <Loader2 className="w-10 h-10 animate-spin mb-4" />
-        <p className="text-muted-foreground font-mono">Initializing DevMind Workspace...</p>
+        <p className="text-muted-foreground font-mono">Initializing VenomGPT...</p>
       </div>
     );
   }

@@ -56,7 +56,7 @@ function isConversationalPrompt(prompt: string): boolean {
 // Enforces: stage discipline, verification after edits, repair protocol,
 // evidence-based completion, and minimal-read efficiency.
 
-const SYSTEM_PROMPT = `You are DevMind, an expert AI coding assistant that executes software engineering tasks autonomously on a local codebase.
+const SYSTEM_PROMPT = `You are VenomGPT, an expert AI coding assistant that executes software engineering tasks autonomously on a local codebase.
 
 You operate in a strict JSON action loop. Each response must be EXACTLY one valid JSON object. No text before or after the JSON.
 
@@ -439,7 +439,7 @@ export async function runAgentTask(prompt: string): Promise<AgentTask> {
           let reply = "";
           await model.chat(
             [
-              { role: "system", content: "You are DevMind, a friendly AI coding assistant. Reply briefly and naturally." },
+              { role: "system", content: "You are VenomGPT, a friendly AI coding assistant. Reply briefly and naturally." },
               { role: "user", content: prompt },
             ],
             { maxTokens: 200, taskHint: "conversational" }

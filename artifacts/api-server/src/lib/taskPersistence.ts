@@ -6,8 +6,16 @@
  * the file small. The full event log for a completed task is available in
  * memory for the duration of the server session.
  *
- * File location: <data dir>/.devmind/history.json
- * Data dir defaults to the OS temp dir, overridden by DEVMIND_DATA_DIR env var.
+ * File location: <data dir>/history.json
+ *
+ * Data dir resolution order (first match wins):
+ *   1. VENOMGPT_DATA_DIR env var
+ *   2. DEVMIND_DATA_DIR env var  (backward-compat — migrates data to new path)
+ *   3. ~/.venomgpt               (canonical default)
+ *
+ * Migration: if the canonical ~/.venomgpt/history.json does not exist but
+ * the legacy ~/.devmind/history.json does, the legacy file is copied to the
+ * new location so no history is lost on upgrade.
  */
 
 import fs from "fs/promises";
@@ -16,10 +24,22 @@ import os from "os";
 import { logger } from "./logger.js";
 import { registerTaskCompletionHook, hydratePersistedTask, type AgentTaskSummary } from "./sessionManager.js";
 
-const DATA_DIR = process.env["DEVMIND_DATA_DIR"]
-  ? path.resolve(process.env["DEVMIND_DATA_DIR"])
-  : path.join(os.homedir(), ".devmind");
+// ─── Data directory resolution ────────────────────────────────────────────────
 
+const LEGACY_DATA_DIR = path.join(os.homedir(), ".devmind");
+const CANONICAL_DATA_DIR = path.join(os.homedir(), ".venomgpt");
+
+function resolveDataDir(): string {
+  if (process.env["VENOMGPT_DATA_DIR"]) {
+    return path.resolve(process.env["VENOMGPT_DATA_DIR"]);
+  }
+  if (process.env["DEVMIND_DATA_DIR"]) {
+    return path.resolve(process.env["DEVMIND_DATA_DIR"]);
+  }
+  return CANONICAL_DATA_DIR;
+}
+
+const DATA_DIR = resolveDataDir();
 const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 
 // Maximum number of tasks to keep in the history file
@@ -38,6 +58,44 @@ function serialise(summary: AgentTaskSummary): AgentTaskSummary {
     createdAt:   new Date(summary.createdAt),
     completedAt: summary.completedAt ? new Date(summary.completedAt) : undefined,
   };
+}
+
+// ─── Legacy migration ─────────────────────────────────────────────────────────
+
+/**
+ * If the canonical history file doesn't exist but the legacy one does,
+ * copy it over so existing history is preserved after the rename.
+ */
+async function migrateFromLegacyIfNeeded(): Promise<void> {
+  const legacyFile = path.join(LEGACY_DATA_DIR, "history.json");
+
+  // Only migrate when using the canonical default dir (not when the user
+  // has set a custom dir via env var, which they control themselves).
+  if (DATA_DIR !== CANONICAL_DATA_DIR) return;
+
+  try {
+    await fs.access(HISTORY_FILE);
+    return; // Canonical file already exists — no migration needed
+  } catch {
+    // Canonical file absent — check for legacy
+  }
+
+  try {
+    await fs.access(legacyFile);
+  } catch {
+    return; // No legacy file either — nothing to migrate
+  }
+
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.copyFile(legacyFile, HISTORY_FILE);
+    logger.info(
+      { from: legacyFile, to: HISTORY_FILE },
+      "Migrated task history from legacy .devmind directory to .venomgpt"
+    );
+  } catch (err) {
+    logger.warn({ err, legacyFile, HISTORY_FILE }, "Failed to migrate legacy task history — starting fresh");
+  }
 }
 
 // ─── Read / write ─────────────────────────────────────────────────────────────
@@ -70,9 +128,11 @@ let _persisted: AgentTaskSummary[] = [];
 
 /**
  * Load persisted task history from disk and hydrate the session manager.
+ * Handles migration from the legacy .devmind directory automatically.
  * Call this once at server start AFTER setting up the workspace.
  */
 export async function loadPersistedHistory(): Promise<void> {
+  await migrateFromLegacyIfNeeded();
   _persisted = await readHistory();
   logger.info({ count: _persisted.length, file: HISTORY_FILE }, "Loaded task history");
 

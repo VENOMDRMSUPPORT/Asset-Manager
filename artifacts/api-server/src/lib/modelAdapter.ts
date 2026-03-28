@@ -234,7 +234,7 @@ function resolveProviderConfig(): ProviderConfig {
 
   throw new ModelError(
     [
-      "No AI provider configured. To use DevMind locally:",
+      "No AI provider configured. To use VenomGPT locally:",
       "  1. Get an API key at https://z.ai/manage-apikey/apikey-list",
       "  2. Add ZAI_API_KEY=your_key to your .env file at the repo root",
       "  3. Restart the server",
@@ -490,12 +490,12 @@ async function callWithFallback(
     if (isRetry) {
       logger.warn(
         { modelId: candidate.modelId, lane: candidate.lane, attempt: i + 1 },
-        `[DevMind] ${logContext}: trying fallback #${i} — ${candidate.modelId} (${candidate.lane} lane)`
+        `[VenomGPT] ${logContext}: trying fallback #${i} — ${candidate.modelId} (${candidate.lane} lane)`
       );
     } else {
       logger.debug(
         { modelId: candidate.modelId, lane: candidate.lane },
-        `[DevMind] ${logContext}: ${candidate.reason}`
+        `[VenomGPT] ${logContext}: ${candidate.reason}`
       );
     }
 
@@ -504,7 +504,7 @@ async function callWithFallback(
       if (isRetry) {
         logger.info(
           { modelId: candidate.modelId, lane: candidate.lane },
-          `[DevMind] ${logContext}: fallback succeeded with ${candidate.modelId} (${candidate.lane} lane)`
+          `[VenomGPT] ${logContext}: fallback succeeded with ${candidate.modelId} (${candidate.lane} lane)`
         );
       }
       return result;
@@ -515,7 +515,7 @@ async function callWithFallback(
       const retriable = isEntitlementError(categorized);
       logger.warn(
         { modelId: candidate.modelId, lane: candidate.lane, category: categorized.category, retriable },
-        `[DevMind] ${logContext}: ${candidate.modelId} failed [${categorized.category}]`
+        `[VenomGPT] ${logContext}: ${candidate.modelId} failed [${categorized.category}]`
       );
 
       if (!retriable) {
@@ -678,7 +678,7 @@ export function logProviderDiagnostic(): void {
     const isZai = config.name === "zai";
 
     logger.info("─".repeat(60));
-    logger.info("[DevMind] AI Provider Diagnostic");
+    logger.info("[VenomGPT] AI Provider Diagnostic");
     logger.info(`  Provider         : ${config.name}`);
     logger.info(`  PAAS lane URL    : ${config.paasBaseURL}`);
     if (isZai) {
@@ -697,6 +697,6 @@ export function logProviderDiagnostic(): void {
     logger.info("─".repeat(60));
   } catch (err) {
     const msg = err instanceof ModelError ? err.message : String(err);
-    logger.warn(`[DevMind] No AI provider configured:\n${msg}`);
+    logger.warn(`[VenomGPT] No AI provider configured:\n${msg}`);
   }
 }

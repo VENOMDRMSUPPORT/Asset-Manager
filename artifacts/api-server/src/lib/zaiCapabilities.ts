@@ -98,7 +98,7 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     implementationStatus: "implemented",
     preferredLane: "anthropic",
     supportedLanes: ["anthropic"],
-    notes: "Primary DevMind model. Auto-selected for coding and agentic tasks. Anthropic lane only.",
+    notes: "Primary VenomGPT model. Auto-selected for coding and agentic tasks. Anthropic lane only.",
   },
 
   {
@@ -281,7 +281,7 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     implementationStatus: "deferred",
     preferredLane: "paas",
     supportedLanes: ["paas"],
-    notes: "Async polling. Not wired in DevMind agent loop.",
+    notes: "Async polling. Not wired in VenomGPT agent loop.",
   },
 
   // ═══ Audio — deferred ════════════════════════════════════════════════════════
@@ -299,7 +299,7 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     implementationStatus: "deferred",
     preferredLane: "paas",
     supportedLanes: ["paas"],
-    notes: "Audio-specific endpoint. Not wired in DevMind.",
+    notes: "Audio-specific endpoint. Not wired in VenomGPT.",
   },
 ];
 

@@ -37,7 +37,7 @@ export function WorkspaceSetupDialog({ open }: WorkspaceSetupDialogProps) {
         <div className="p-6">
           <div className="flex items-center gap-3 mb-2 text-primary">
             <FolderGit2 className="w-8 h-8 shrink-0" />
-            <h2 className="text-2xl font-bold text-foreground">Welcome to DevMind</h2>
+            <h2 className="text-2xl font-bold text-foreground">Welcome to VenomGPT</h2>
           </div>
           <p className="text-muted-foreground mb-5 text-sm leading-relaxed">
             Set the local project folder the AI agent will read and edit. Choose a specific project directory, not a system root.
