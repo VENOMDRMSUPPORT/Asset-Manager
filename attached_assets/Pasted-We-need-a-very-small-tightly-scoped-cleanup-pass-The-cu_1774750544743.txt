@@ -1,0 +1,131 @@
+We need a very small, tightly scoped cleanup pass.
+
+The current `main` branch has already been verified as correct in `artifacts/api-server/src/lib/agentLoop.ts` for visual control flow:
+
+* no degrade-to-text logic remains
+* no `visualDegraded` remains
+* visual debug guidance is not injected after failed vision
+
+So this is **not** a control-flow correction pass.
+
+## Goal
+
+Perform a **Z.AI capability scope tightening / registry cleanup** pass only.
+
+This is not a new phase.
+This is not capability expansion.
+This is not a provider refactor.
+This is not a multimodal redesign.
+
+It is only a small cleanup pass to make the capability/model surface reflect the current real project scope more honestly.
+
+## Current problem
+
+`artifacts/api-server/src/lib/zaiCapabilities.ts` still exposes a broader surface than the project currently needs, which risks giving the impression that some image/video/audio generation or other deferred capabilities are part of the current usable scope.
+
+We want the capability surface to clearly distinguish between:
+
+* implemented now
+* explicitly blocked / unavailable now
+* truly deferred future capabilities
+
+We do **not** want entries that imply near-term actionable support for capabilities that are not part of the current real product scope.
+
+## Scope
+
+Review and tighten:
+
+* `artifacts/api-server/src/lib/zaiCapabilities.ts`
+
+Only touch another file if there is a **small, direct, necessary** reason strictly related to reducing capability-scope confusion.
+
+Do **not** touch `agentLoop.ts` unless a tiny, direct, unavoidable change is required purely to keep capability semantics consistent.
+
+## Required outcomes
+
+1. Reduce the visible capability/model surface so it matches the current actual project scope.
+2. Keep only what clearly serves the current usable product reality:
+
+   * text / coding
+   * current visual route reality
+   * what is actually used now
+3. Remove, isolate, or clearly demote entries that imply support for capabilities outside current scope.
+4. Make deferred capabilities clearly deferred, not quasi-active.
+5. Prevent any implication that image generation, video generation, or audio capabilities are part of the current usable scope.
+6. Do not add providers.
+7. Do not broaden routing.
+8. Do not redesign the registry architecture unless absolutely required for a minimal cleanup.
+
+## Specific cleanup target
+
+If entries such as the following still exist in a way that makes them look like part of the current actionable surface:
+
+* `glm-image`
+* `cogview-4`
+* `cogvideox-3`
+* `glm-asr-2512`
+
+or similar deferred / unused capabilities,
+
+then do one of the following:
+
+* move them into a clearer deferred metadata shape that does not read like current actionable support
+* or isolate them so they no longer appear as part of the current usable surface
+
+The result must preserve clarity between:
+
+* implemented now
+* unavailable / blocked now
+* deferred future
+
+## Important constraints
+
+Do not:
+
+* start a new phase
+* expand capabilities
+* add provider surfaces
+* refactor unrelated files
+* alter working file/command task behavior
+* alter the already-corrected visual control flow
+* perform cosmetic cleanup outside this scope
+
+## What to inspect
+
+Inspect how `zaiCapabilities.ts` currently:
+
+* declares model entries
+* labels model statuses
+* exposes “implemented / provider_only / deferred” distinctions
+* may still make deferred capabilities feel too “present” in the current product surface
+
+Tighten that presentation and structure with the smallest correct change set.
+
+## Verification required
+
+You must verify and report clearly:
+
+1. What remains visible as the current capability scope
+2. What is now clearly deferred
+3. That this change does **not** alter current file/command task behavior
+4. That this change does **not** alter the already-correct visual control flow
+5. That TypeScript / build remains clean
+
+At minimum, run and report:
+
+* TypeScript check
+* any relevant build/check command needed to confirm no breakage
+* targeted confirmation that file/command paths were not behaviorally changed by this cleanup
+
+## Final response format
+
+1. What I changed
+2. Why this cleanup was needed
+3. What remains in the current capability surface
+4. What was pushed into clearly deferred scope
+5. Files changed
+6. Verification performed
+7. Remaining risks / intentionally deferred items
+
+Do not stop at analysis.
+Make the code changes, verify them, and report real results.

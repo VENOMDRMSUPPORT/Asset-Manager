@@ -20,6 +20,19 @@
  *
  * The registry marks each model's preferred lane and supported lanes so the
  * provider can pick the correct endpoint and fall back intelligently.
+ *
+ * ─── SCOPE BOUNDARY ──────────────────────────────────────────────────────────
+ *
+ * VenomGPT is a text/coding + screenshot-analysis product.
+ *
+ * Only two capability families are in scope right now:
+ *   1. text_coding / text_general / agentic  — the coding agent loop
+ *   2. vision                                — screenshot input → visual analysis
+ *
+ * Image generation, video generation, and audio transcription are
+ * NOT in scope.  Those Z.AI models are documented in ZAI_OUT_OF_SCOPE_MODELS
+ * below and are explicitly excluded from ZAI_MODEL_REGISTRY so they do not
+ * appear as actionable in diagnostics or capability reporting.
  */
 
 // ─── Lane types ───────────────────────────────────────────────────────────────
@@ -27,15 +40,16 @@
 /** The two Z.AI API endpoint families. */
 export type ZaiLane = "paas" | "anthropic";
 
-// ─── Capability types ────────────────────────────────────────────────────────
+// ─── Capability types — in-scope only ────────────────────────────────────────
+//
+// Only capabilities that VenomGPT actually uses are listed here.
+// image_gen, video_gen, audio_stt are deliberately absent — those belong to
+// out-of-scope Z.AI models and must not appear in the current product surface.
 
 export type ZaiCapabilityType =
   | "text_coding"
   | "text_general"
   | "vision"
-  | "image_gen"
-  | "video_gen"
-  | "audio_stt"
   | "tools"
   | "structured"
   | "long_context"
@@ -47,15 +61,13 @@ export type ZaiCapabilityType =
 
 export type ZaiCallPattern =
   | "sync"
-  | "streaming"
-  | "async_poll";
+  | "streaming";
 
 // ─── Implementation status ───────────────────────────────────────────────────
 
 export type ZaiImplementationStatus =
-  | "implemented"
-  | "provider_only"
-  | "deferred";
+  | "implemented"   // wired and active in the agent loop
+  | "deferred";     // known to be possible but not wired yet (still in-scope)
 
 // ─── Model spec ──────────────────────────────────────────────────────────────
 
@@ -77,7 +89,13 @@ export interface ZaiModelSpec {
   notes?: string;
 }
 
-// ─── Z.AI Model Registry ─────────────────────────────────────────────────────
+// ─── Z.AI Model Registry (in-scope) ──────────────────────────────────────────
+//
+// Contains ONLY models that are wired or deferred within VenomGPT's current
+// product scope (text/coding + screenshot vision).
+//
+// Out-of-scope Z.AI models (image gen, video gen, audio) are in
+// ZAI_OUT_OF_SCOPE_MODELS below and are never surfaced to routing logic.
 
 export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
 
@@ -199,6 +217,10 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
   },
 
   // ═══ Vision models — PAAS lane ══════════════════════════════════════════════
+  //
+  // Used in phase 1 of visual tasks: screenshot → structured text analysis.
+  // Requires the Z.AI PAAS vision model entitlement package on the account.
+  // Without entitlement, visual tasks fail honestly (no silent text fallback).
 
   {
     modelId: "glm-4.6v",
@@ -213,7 +235,7 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     implementationStatus: "implemented",
     preferredLane: "paas",
     supportedLanes: ["paas"],
-    notes: "Auto-selected when messages contain image_url content. PAAS lane.",
+    notes: "Auto-selected when messages contain image_url content. PAAS lane. Requires vision entitlement.",
   },
 
   {
@@ -229,79 +251,33 @@ export const ZAI_MODEL_REGISTRY: ZaiModelSpec[] = [
     implementationStatus: "implemented",
     preferredLane: "paas",
     supportedLanes: ["paas"],
-    notes: "Free vision tier. PAAS lane.",
-  },
-
-  // ═══ Image generation — not wired ═══════════════════════════════════════════
-
-  {
-    modelId: "glm-image",
-    displayName: "GLM-Image",
-    description: "Text-to-image generation. Uses POST /images/generations.",
-    capabilities: ["image_gen"],
-    callPatterns: ["sync"],
-    contextWindow: 0,
-    maxOutput: 0,
-    priceInputPer1M: null,
-    priceOutputPer1M: null,
-    implementationStatus: "provider_only",
-    preferredLane: "paas",
-    supportedLanes: ["paas"],
-    notes: "Not wired. Needs dedicated /images/generations endpoint.",
-  },
-
-  {
-    modelId: "cogview-4",
-    displayName: "CogView-4",
-    description: "Alternative text-to-image model.",
-    capabilities: ["image_gen"],
-    callPatterns: ["sync"],
-    contextWindow: 0,
-    maxOutput: 0,
-    priceInputPer1M: null,
-    priceOutputPer1M: null,
-    implementationStatus: "provider_only",
-    preferredLane: "paas",
-    supportedLanes: ["paas"],
-    notes: "Same constraints as GLM-Image.",
-  },
-
-  // ═══ Video generation — deferred ════════════════════════════════════════════
-
-  {
-    modelId: "cogvideox-3",
-    displayName: "CogVideoX-3",
-    description: "Text/image to video. Async polling required.",
-    capabilities: ["video_gen"],
-    callPatterns: ["async_poll"],
-    contextWindow: 0,
-    maxOutput: 0,
-    priceInputPer1M: null,
-    priceOutputPer1M: null,
-    implementationStatus: "deferred",
-    preferredLane: "paas",
-    supportedLanes: ["paas"],
-    notes: "Async polling. Not wired in VenomGPT agent loop.",
-  },
-
-  // ═══ Audio — deferred ════════════════════════════════════════════════════════
-
-  {
-    modelId: "glm-asr-2512",
-    displayName: "GLM-ASR-2512",
-    description: "Speech-to-text.",
-    capabilities: ["audio_stt"],
-    callPatterns: ["sync"],
-    contextWindow: 0,
-    maxOutput: 0,
-    priceInputPer1M: null,
-    priceOutputPer1M: null,
-    implementationStatus: "deferred",
-    preferredLane: "paas",
-    supportedLanes: ["paas"],
-    notes: "Audio-specific endpoint. Not wired in VenomGPT.",
+    notes: "Free vision tier. PAAS lane. Fallback when glm-4.6v entitlement fails.",
   },
 ];
+
+// ─── Out-of-scope Z.AI models ─────────────────────────────────────────────────
+//
+// These models exist on the Z.AI platform but are NOT part of VenomGPT's
+// product scope.  VenomGPT is a text/coding + screenshot-analysis tool.
+// Image generation, video generation, and speech-to-text are out of scope.
+//
+// They are listed here purely for reference and are EXCLUDED from:
+//   • ZAI_MODEL_REGISTRY (not counted, not routed, not shown in diagnostics)
+//   • getFallbackChain() (not eligible for any routing hint)
+//   • getCapabilitySummary() (not shown as part of the usable surface)
+//
+// Do not move these into ZAI_MODEL_REGISTRY without a deliberate product scope
+// change decision.
+
+export const ZAI_OUT_OF_SCOPE_MODELS = [
+  // Image generation — different API endpoint (/images/generations), not a chat model
+  { modelId: "glm-image",   reason: "text-to-image generation — out of scope for coding assistant" },
+  { modelId: "cogview-4",   reason: "text-to-image generation — out of scope for coding assistant" },
+  // Video generation — requires async polling, separate endpoint, out of scope
+  { modelId: "cogvideox-3", reason: "text/image-to-video generation — out of scope for coding assistant" },
+  // Audio transcription — requires audio input endpoint, out of scope
+  { modelId: "glm-asr-2512", reason: "speech-to-text — out of scope for coding assistant" },
+] as const;
 
 // ─── Lookup helpers ──────────────────────────────────────────────────────────
 
@@ -358,10 +334,10 @@ export function getFallbackChain(
     case "agentic":
     case "coding":
       return [
-        { modelId: "glm-5.1",      lane: "anthropic", reason: `hint="${hint}" → GLM-5.1 (Anthropic lane, flagship agentic)` },
-        { modelId: "glm-5",        lane: "anthropic", reason: `fallback #1 → GLM-5 (Anthropic lane)` },
-        { modelId: "glm-4.7",      lane: "anthropic", reason: `fallback #2 → GLM-4.7 (Anthropic lane)` },
-        { modelId: "glm-4.7-flash",lane: "paas",      reason: `fallback #3 → GLM-4.7-Flash (PAAS lane, free)` },
+        { modelId: "glm-5.1",       lane: "anthropic", reason: `hint="${hint}" → GLM-5.1 (Anthropic lane, flagship agentic)` },
+        { modelId: "glm-5",         lane: "anthropic", reason: `fallback #1 → GLM-5 (Anthropic lane)` },
+        { modelId: "glm-4.7",       lane: "anthropic", reason: `fallback #2 → GLM-4.7 (Anthropic lane)` },
+        { modelId: "glm-4.7-flash", lane: "paas",      reason: `fallback #3 → GLM-4.7-Flash (PAAS lane, free)` },
       ];
 
     case "vision":
@@ -372,8 +348,8 @@ export function getFallbackChain(
 
     case "conversational":
       return [
-        { modelId: "glm-4.7-flash", lane: "paas",      reason: `hint="conversational" → GLM-4.7-Flash (PAAS lane, free, fast)` },
-        { modelId: "glm-4.5-flash", lane: "paas",      reason: `fallback → GLM-4.5-Flash (PAAS lane, free)` },
+        { modelId: "glm-4.7-flash", lane: "paas", reason: `hint="conversational" → GLM-4.7-Flash (PAAS lane, free, fast)` },
+        { modelId: "glm-4.5-flash", lane: "paas", reason: `fallback → GLM-4.5-Flash (PAAS lane, free)` },
       ];
 
     case "general":
@@ -400,20 +376,30 @@ export function selectZaiModel(
 
 /**
  * Human-readable capability + lane summary. Used in startup diagnostics.
+ * Only covers in-scope models from ZAI_MODEL_REGISTRY.
+ * Out-of-scope models (image/video/audio) are excluded by design.
  */
 export function getCapabilitySummary(): string {
   const implemented = getImplementedModels();
-  const providerOnly = ZAI_MODEL_REGISTRY.filter((m) => m.implementationStatus === "provider_only");
-  const deferred = ZAI_MODEL_REGISTRY.filter((m) => m.implementationStatus === "deferred");
+  const deferred    = ZAI_MODEL_REGISTRY.filter((m) => m.implementationStatus === "deferred");
 
-  const paasModels = implemented.filter((m) => m.preferredLane === "paas").map((m) => m.modelId);
+  const paasModels     = implemented.filter((m) => m.preferredLane === "paas").map((m) => m.modelId);
   const anthropicModels = implemented.filter((m) => m.preferredLane === "anthropic").map((m) => m.modelId);
 
-  return [
+  const lines = [
     `Z.AI Capability Registry (${ZAI_MODEL_REGISTRY.length} models, 2 lanes)`,
     `  PAAS lane      (/api/paas/v4/)      : ${paasModels.join(", ")}`,
     `  Anthropic lane (/api/anthropic/v1/) : ${anthropicModels.join(", ")}`,
-    `  Provider-only / not wired (${providerOnly.length}): ${providerOnly.map((m) => m.modelId).join(", ")}`,
-    `  Deferred (${deferred.length}): ${deferred.map((m) => m.modelId).join(", ")}`,
-  ].join("\n");
+  ];
+
+  if (deferred.length > 0) {
+    lines.push(`  Deferred (${deferred.length}): ${deferred.map((m) => m.modelId).join(", ")}`);
+  }
+
+  lines.push(
+    `  Out of scope (image/video/audio — excluded from routing): ` +
+    ZAI_OUT_OF_SCOPE_MODELS.map((m) => m.modelId).join(", ")
+  );
+
+  return lines.join("\n");
 }
