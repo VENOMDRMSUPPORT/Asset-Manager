@@ -189,7 +189,7 @@ export function SplitBrain() {
             </div>
             <div className="text-zinc-500 select-none flex">
               <div className="w-8 text-right pr-4 border-r border-zinc-800 mr-4">14</div>
-              <div className="text-zinc-300 pl-8"><span className="text-violet-400">this</span>.logger.<span className="text-blue-400">info</span>(<span className="text-green-400">\`Starting task: \${task}\`</span>);</div>
+              <div className="text-zinc-300 pl-8"><span className="text-violet-400">this</span>.logger.<span className="text-blue-400">info</span>(<span className="text-green-400">{'`Starting task: ${task}`'}</span>);</div>
             </div>
             <div className="text-zinc-500 select-none flex">
               <div className="w-8 text-right pr-4 border-r border-zinc-800 mr-4">15</div>
