@@ -5,6 +5,9 @@
  * PATCH  /api/settings         — update one or more settings fields
  * POST   /api/settings/reset   — reset all settings to defaults
  * DELETE /api/settings/history — clear all task history
+ *
+ * Note: this router is mounted under /api in app.ts, so route paths here
+ * must NOT include the /api prefix.
  */
 
 import { Router } from "express";
@@ -50,7 +53,7 @@ function historyStats() {
  * GET /api/settings
  * Returns current settings + provider metadata + history stats.
  */
-router.get("/api/settings", (_req, res) => {
+router.get("/settings", (_req, res) => {
   res.json({
     settings: getSettings(),
     provider: providerInfo(),
@@ -63,7 +66,7 @@ router.get("/api/settings", (_req, res) => {
  * Accepts a partial VenomGPTSettings object. Unknown keys are ignored.
  * Validation is performed inside updateSettings().
  */
-router.patch("/api/settings", async (req, res) => {
+router.patch("/settings", async (req, res) => {
   try {
     const patch = req.body as Record<string, unknown>;
     const updated = await updateSettings(patch as never);
@@ -79,7 +82,7 @@ router.patch("/api/settings", async (req, res) => {
  * POST /api/settings/reset
  * Resets all settings to factory defaults.
  */
-router.post("/api/settings/reset", async (_req, res) => {
+router.post("/settings/reset", async (_req, res) => {
   const defaults = await resetSettings();
   res.json({ settings: defaults });
 });
@@ -88,7 +91,7 @@ router.post("/api/settings/reset", async (_req, res) => {
  * DELETE /api/settings/history
  * Clears all persisted task history (on disk) and the in-memory task list.
  */
-router.delete("/api/settings/history", async (_req, res) => {
+router.delete("/settings/history", async (_req, res) => {
   try {
     await clearPersistedHistory();
     clearAllTasks();
