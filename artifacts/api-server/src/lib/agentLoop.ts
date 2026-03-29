@@ -423,56 +423,245 @@ function classifyTask(images: string[]): VisualTaskMeta {
 // while the best coding model handles planning + execution.
 
 // ─── Visual task intent classification ────────────────────────────────────────
-// Determines whether a visual task wants a FILE REPORT (describe/document what
-// is visible) vs. a CODE FIX (find and repair a CSS/visual defect in the code).
-// "report" → fast grounded 3-section prompt, no CSS inference, agent writes directly
-// "fix"    → full 6-section CSS defect report, agent inspects files before editing
+//
+// Five distinct image-task categories, classified by prompt language:
+//
+//   "describe"  — "what is this?", "explain this error", "what do you see?"
+//                 User wants a direct natural-language answer. No file writing.
+//                 Fastest path: vision → direct done (0 agent file ops).
+//
+//   "report"    — "write a file about this", "document this error", "save a report"
+//                 User wants findings written to a file.
+//                 Path: vision → write_file → verify → done.
+//
+//   "fix"       — "fix this layout bug", "why is X broken", "something is wrong"
+//                 User wants a specific defect found and repaired in the code.
+//                 Path: vision → inspect CSS files → edit → verify → done.
+//
+//   "improve"   — "improve this UI", "make this better", "enhance this component"
+//                 User wants general UX/visual improvements, not bug fixes.
+//                 Path: vision → explore relevant files → implement improvements → verify.
+//
+//   "analyze"   — "analyze this design", "audit this UI", "review this component"
+//                 User wants a comprehensive assessment without a specific fix target.
+//                 Path: vision → write analysis file or respond directly → done.
+//
+// Classification uses a priority-ordered set of rules. The first matching rule wins.
+// Default (no match): "fix" — safest fallback, least likely to omit useful work.
 
-const VISUAL_REPORT_RE = /\b(write|create|save|generate|produce|make)\b.{0,50}\b(file|report|document|note|description|summary|info|log)\b|\b(document|describe|record|note|log|put|capture)\b.{0,40}\b(error|issue|problem|bug|warning|exception|crash|fail|screen|screenshot|visible|shown)/i;
+export type VisualIntent = "describe" | "report" | "fix" | "improve" | "analyze";
 
-function classifyVisualIntent(prompt: string): "report" | "fix" {
-  return VISUAL_REPORT_RE.test(prompt) ? "report" : "fix";
+// Matches pure explanatory/conversational questions with no action keyword.
+// Intentionally conservative — FIX_RE runs BEFORE this in the classifier.
+const DESCRIBE_RE  = /^(what|explain|tell me|can you explain|show me what|is this|how (does|is) (this|the)|what('s| is| are| do| can| did))\b|^(summarize|what do you (see|notice|think)|what (happened|is happening|does this|is shown))|^(i (don't|do not|can't|cannot) understand)/i;
+const DESCRIBE_RE2 = /\b(what('s| is| are| does)|explain (this|the|what|why|how)|tell me (about|what|why|how)|what (error|message|issue|problem|text|does this|is this|do you see)|why (is|does|did|are|isn't|doesn't)\s+(there|this|that|the)|how (does|is) (this|the)|summarize (this|the)|what (happened|is happening)|understand (this|what))\b/i;
+
+// Explicit file write or document request — highest priority.
+const REPORT_RE    = /\b(write|create|save|generate|produce|make)\b.{0,50}\b(file|report|document|note|description|summary|info|log)\b|\b(document|record|log|put|capture)\b.{0,40}\b(error|issue|problem|bug|warning|exception|crash|fail|screen|screenshot|visible|shown)\b/i;
+
+// UI/UX enhancement suggestions, not defect repair.
+// Handles "make X look better", "make X nicer", "make it better" etc.
+const IMPROVE_RE   = /\b(improve|enhance|make\s+(?:it\s+|this\s+|the\s+)?(?:\w+\s+)?(better|nicer|cleaner|faster|smoother)|upgrade|refine|polish|suggest(ions?)?|recommendation|how (can|could|should|to) (improve|enhance|make|be better))\b/i;
+
+// Comprehensive assessment — "analyze" needs full word forms (not just prefix)
+// because \b would fail inside multi-char words like "analyze" with prefix "analyz".
+const ANALYZE_RE   = /\b(analyz[a-z]*|analys[a-z]*|audit|review|assess[a-z]*|evaluat[a-z]*|examine|go through|look over|check (the|this|my)|what('s| is) wrong with|overview of|assessment of)\b/i;
+
+// Specific defect to repair — tested BEFORE describe so "why is X misaligned"
+// routes to fix rather than matching the "why is" describe prefix.
+const FIX_RE       = /\b(fix|repair|resolve|broken|not working|doesn'?t work|wrong|issue|bug|defect|glitch|misaligned|overflow(ing)?|clipping|layout (problem|issue|bug)|off by|too (wide|narrow|tall|short|big|small)|overlapping|doesn'?t (show|render|display|load|work)|not (showing|rendering|displaying|loading))\b/i;
+
+export function classifyVisualIntent(prompt: string): VisualIntent {
+  const p = prompt.trim();
+  // 1. Report: explicit file write intent — always highest priority
+  if (REPORT_RE.test(p))                            return "report";
+  // 2. Improve: enhancement / suggestion language
+  if (IMPROVE_RE.test(p))                           return "improve";
+  // 3. Analyze: comprehensive assessment language
+  if (ANALYZE_RE.test(p))                           return "analyze";
+  // 4. Fix: specific defect keywords — runs BEFORE describe so that
+  //    "why is X misaligned" routes to fix rather than to describe
+  if (FIX_RE.test(p))                               return "fix";
+  // 5. Describe: pure conversational/explanatory questions
+  if (DESCRIBE_RE.test(p) || DESCRIBE_RE2.test(p)) return "describe";
+  // Default: fix is safest when intent is ambiguous and an image is attached
+  return "fix";
 }
 
-// ─── Vision analysis system prompts ───────────────────────────────────────────
+// ─── Vision analysis system prompts — one per intent ─────────────────────────
 
-// "fix" path: full 6-section CSS defect forensics (unchanged — only for CSS repair tasks)
-const VISION_FIX_SYSTEM = `You are a senior frontend engineer specialised in diagnosing visual defects in web and mobile applications from screenshots.
+// "describe": concise natural-language explanation, no jargon required
+const VISION_DESCRIBE_SYSTEM = `You are a helpful assistant who explains what is visible in screenshots clearly and concisely.
+Your job: look at the screenshot(s) and give a clear, direct answer to the user's question.
+Rules:
+• Only describe what is literally visible. Do not invent hidden state, server errors, or root causes.
+• Use plain language. Avoid CSS/engineering jargon unless the user asked for it.
+• Quote any visible error messages or text verbatim.
+• If you cannot determine something from the screenshot alone, say so explicitly.
+• Be concise. Answer the question directly.`;
 
-Your job: examine the screenshot(s) and produce a precise, code-actionable defect report that a developer can use to open the right file and fix the right CSS rule.
-
-Discipline rules:
-• Report only what is VISUALLY PRESENT in the screenshot. Never invent or infer invisible state.
-• Label every finding as OBSERVED (visible fact) or INFERRED (engineering inference drawn from visible evidence).
-• Use frontend/CSS vocabulary precisely: flex, grid, overflow, z-index, position, margin, padding, gap, clip, viewport, breakpoint, transform, align-items, justify-content, min-height, max-width, etc.
-• Be spatially precise: describe WHERE in the viewport each defect appears — top/bottom/left/right, inside/outside which container, which layer.
-• Name visible UI regions and components clearly: navbar, sidebar, card, modal, table row, button, form field, panel, tab bar, tooltip, overlay, scrollable container, etc.
-• When something is cut off, partially obscured, or outside the screenshot boundary, say so explicitly.
-• Do not guess at business logic, server state, or framework internals not visible in the screenshot.
-• When multiple defects are present, list them individually — do not group them into vague summaries.`;
-
-// "report" path: fast grounded 3-section description — no CSS bias, no fabrication
+// "report": grounded 3-section structured description for file writing
 const VISION_REPORT_SYSTEM = `You are a software debugging assistant. Your job is to look at a screenshot and produce a concise, strictly grounded description of what is visible.
-
 Strict grounding rules — you MUST follow these:
 • OBSERVED section: only facts directly readable from the screenshot. Quote error messages verbatim. No inference, no speculation.
 • LIKELY INFERENCE section: reasonable conclusions drawn from visible evidence. Each item MUST be labelled "INFERENCE:".
-• CANNOT CONFIRM section: anything that cannot be determined from the screenshot alone — hidden logs, server state, API calls, root causes not shown visually. List these explicitly so the reader knows what was NOT confirmed.
+• CANNOT CONFIRM section: anything that cannot be determined from the screenshot alone — hidden logs, server state, API calls, root causes not shown visually. List explicitly.
+Never invent: server-side error codes, API failures, hidden terminal output, entitlement issues, or CSS root causes — unless literally printed in the screenshot.
+Be brief and factual. Stop after the three sections.`;
 
-Never invent: server-side error codes, API failures, hidden terminal output, entitlement issues, fallback chain failures, or CSS root causes — unless those are literally printed in the screenshot.
-Be brief and factual. Stop after the three sections. Do not repeat yourself.`;
+// "fix": precise CSS defect forensics for targeted bug repair
+const VISION_FIX_SYSTEM = `You are a senior frontend engineer specialised in diagnosing visual defects in web and mobile applications from screenshots.
+Your job: examine the screenshot(s) and produce a precise, code-actionable defect report a developer can use to open the right file and fix the right CSS rule.
+Rules:
+• Report only what is VISUALLY PRESENT. Never invent invisible state.
+• Label findings as OBSERVED (visible fact) or INFERRED (inference from visible evidence).
+• Use CSS vocabulary precisely: flex, grid, overflow, z-index, position, margin, padding, gap, etc.
+• Be spatially precise: TOP/BOTTOM/LEFT/RIGHT, inside/outside which container, which layer.
+• Name UI regions clearly: navbar, sidebar, card, modal, table row, button, form field, panel.
+• When content is cut off or obscured, say so explicitly.
+• List multiple defects individually — do not group them.`;
+
+// "improve": UX/visual enhancement opportunities, not bug fixes
+const VISION_IMPROVE_SYSTEM = `You are a senior UX and frontend engineer reviewing a UI for improvement opportunities.
+Your job: identify concrete, implementable improvements to the visible UI — not bugs, but enhancements.
+Rules:
+• Focus on: spacing, visual hierarchy, typography, color contrast, alignment, component density, empty states, feedback affordances.
+• For each improvement, state: CURRENT STATE → SUGGESTED CHANGE → EXPECTED BENEFIT.
+• Be specific about what CSS or component change would achieve each improvement.
+• Do not invent problems that aren't visible. Only suggest changes based on what you actually see.
+• Prioritize: high-impact changes first. Limit to the 5 most valuable improvements.`;
+
+// "analyze": balanced comprehensive assessment without a specific fix target
+const VISION_ANALYZE_SYSTEM = `You are a senior frontend engineer and UX reviewer conducting a structured analysis of a UI screenshot.
+Your job: provide a balanced, comprehensive assessment covering both strengths and areas for improvement.
+Structure your analysis as:
+• WHAT IS SHOWN: describe what you see clearly (components, layout, content)
+• WORKING WELL: what is implemented correctly, following good practices
+• AREAS FOR IMPROVEMENT: specific issues or enhancement opportunities (label as bugs vs enhancements)
+• PRIORITY RECOMMENDATION: the single most impactful change to make next
+Rules:
+• Be grounded in what is visible. Label inferences as such.
+• Avoid vague praise or vague criticism — be specific.
+• Do not invent server state or hidden errors not visible in the screenshot.`;
+
+// ─── Token budgets per intent ──────────────────────────────────────────────────
+// Sized to the minimum needed to produce a useful response for each path.
+// Smaller budgets → faster responses. Only "fix" needs full forensics detail.
+
+const VISION_MAX_TOKENS: Record<VisualIntent, number> = {
+  describe:  700,   // concise answer, no sections needed
+  report:   1200,   // 3 structured sections
+  fix:      2500,   // 5-section defect forensics (reduced from 3500)
+  improve:  1800,   // 5 prioritized improvement items
+  analyze:  1800,   // 4-section balanced assessment
+};
+
+// ─── Vision analysis prompts per intent ───────────────────────────────────────
+
+function buildVisionPrompt(intent: VisualIntent, userPrompt: string, countLabel: string): string {
+  switch (intent) {
+    case "describe":
+      return `User question: "${userPrompt}"
+
+Look at ${countLabel} and answer the user's question directly.
+Quote any visible error messages or text verbatim.
+Only describe what you can actually see. If something cannot be determined from the screenshot, say so.
+Be concise and direct.`;
+
+    case "report":
+      return `Developer task: "${userPrompt}"
+
+Examine ${countLabel} and produce a grounded description using exactly these three sections:
+
+## OBSERVED
+List every fact directly visible: error messages (quote verbatim), UI elements, text content, visible state, colour, position. Include nothing not actually shown.
+
+## LIKELY INFERENCE
+Conclusions reasonably drawn from visible evidence. Label every item with "INFERENCE:".
+
+## CANNOT CONFIRM
+What cannot be determined from this screenshot alone: hidden logs, server state, API calls, root causes not on screen. Be specific.
+
+Keep each section concise. Quote error text exactly as shown.`;
+
+    case "fix":
+      return `Developer task: "${userPrompt}"
+
+Examine ${countLabel}. Produce a code-actionable defect report.
+
+## 1. VISIBLE STATE
+Each distinct UI region visible: current visual state, layout, text content, styling. Note viewport position.
+
+## 2. DEFECTS FOUND
+For each defect: (a) describe precisely what is wrong, (b) where in the viewport, (c) which element/component.
+Categories to check: spacing/alignment, overflow/clipping, flex/grid layout, z-index/stacking, sizing, typography, color/style, component state, responsive/viewport.
+Write "✓ none observed" for categories with no defect.
+
+## 3. CSS ROOT-CAUSE INFERENCE
+For each defect: "[Defect] → LIKELY|POSSIBLE CAUSE: [CSS property]". Label confidence.
+
+## 4. COMPONENT OWNERSHIP
+For each defect: (a) visible element with symptom, (b) likely parent component responsible, (c) fix location: inline | component CSS | shared stylesheet | parent container.
+
+## 5. LIMITS
+What cannot be confirmed without reading source code? Be specific.
+
+Be direct. Developer must be able to open the right file and find the right rule.`;
+
+    case "improve":
+      return `Developer task: "${userPrompt}"
+
+Review ${countLabel} for UI/UX improvement opportunities (not bugs — enhancements).
+
+List the top 5 improvements in priority order. For each:
+
+IMPROVEMENT [N]: [Brief title]
+CURRENT: [What you see now]
+CHANGE: [Specific CSS/component change to make]
+BENEFIT: [Why this improves the user experience]
+
+Focus on: visual hierarchy, spacing consistency, typography, color contrast, alignment, density, affordances.
+Only suggest changes based on what is actually visible. Be specific about implementation.`;
+
+    case "analyze":
+      return `Developer task: "${userPrompt}"
+
+Provide a structured analysis of ${countLabel}.
+
+## WHAT IS SHOWN
+Describe the UI: components visible, layout, content, purpose.
+
+## WORKING WELL
+What is implemented correctly or follows good practices? Be specific.
+
+## AREAS FOR IMPROVEMENT
+List specific issues. For each: label as BUG (functional defect) or ENHANCEMENT (quality improvement). State what change is needed.
+
+## PRIORITY RECOMMENDATION
+The single most impactful change to make next, and why.
+
+Be grounded in what is visible. Label inferences as such. Do not invent hidden errors.`;
+  }
+}
 
 async function analyzeVisualContext(
   model:      ReturnType<typeof getModelProvider>,
   images:     string[],
   userPrompt: string,
   taskId:     string,
-  intent:     "report" | "fix"
+  intent:     VisualIntent
 ): Promise<string> {
   const imageCount = images.length;
   const countLabel = imageCount > 1 ? `${imageCount} screenshots` : "this screenshot";
+  const systemMap: Record<VisualIntent, string> = {
+    describe: VISION_DESCRIBE_SYSTEM,
+    report:   VISION_REPORT_SYSTEM,
+    fix:      VISION_FIX_SYSTEM,
+    improve:  VISION_IMPROVE_SYSTEM,
+    analyze:  VISION_ANALYZE_SYSTEM,
+  };
 
-  emit(taskId, "status", `Analyzing ${countLabel} with vision model…`);
+  emit(taskId, "status", `Analyzing ${countLabel} [${intent}] with vision model…`);
   logger.info({ taskId, imageCount, intent }, "[VenomGPT] Starting visual analysis phase");
 
   const imageParts: MessageContentPart[] = images.map(url => ({
@@ -480,115 +669,23 @@ async function analyzeVisualContext(
     image_url: { url },
   }));
 
-  // ── "report" path: fast 3-section grounded description ────────────────────
-  // Designed for "write a file about this error/screenshot" tasks.
-  // Short prompt → short response → faster end-to-end latency.
-  if (intent === "report") {
-    const reportPromptText = `Developer task: "${userPrompt}"
-
-Examine ${countLabel} and produce a grounded description. Use exactly these three sections:
-
-## OBSERVED
-List every fact that is directly visible: error messages (quote verbatim), UI elements, text content, visible state, colour, position. Include nothing that is not actually shown.
-
-## LIKELY INFERENCE
-What can be reasonably concluded from the visible evidence? Label every item with "INFERENCE:" so it is not confused with observation.
-
-## CANNOT CONFIRM
-List what cannot be determined from this screenshot alone: hidden logs, server state, API calls, root causes not shown on screen. Be specific — this section prevents the developer from making unsupported assumptions.
-
-Keep each section concise. Quote any error text exactly as shown.`;
-
-    const analysisMessages: Message[] = [
-      { role: "system", content: VISION_REPORT_SYSTEM },
-      { role: "user",   content: [{ type: "text", text: reportPromptText }, ...imageParts] },
-    ];
-
-    const result = await model.chat(analysisMessages, {
-      maxTokens: 1200,   // short report — 3 focused sections, no CSS forensics
-      taskHint:  "vision",
-    });
-
-    logger.info(
-      { taskId, analysisLength: result.content.length, model: result.modelUsed, lane: result.laneUsed, intent },
-      "[VenomGPT] Visual analysis complete (report path)"
-    );
-
-    const preview = result.content.slice(0, 400) + (result.content.length > 400 ? "…" : "");
-    emit(taskId, "thought", `[INSPECTING] Visual analysis (${result.modelUsed ?? "vision model"}):\n${preview}`);
-    return result.content;
-  }
-
-  // ── "fix" path: full 6-section CSS defect forensics ───────────────────────
-  const fixPromptText = `Developer task: "${userPrompt}"
-
-You are examining ${countLabel}. Produce a structured frontend defect report. Be precise, specific, and code-actionable.
-
-## 1. VISIBLE STATE
-List each distinct UI region or component visible. For each: describe its current visual state, layout, text content, and any styling detail relevant to the task. Note where it appears in the viewport.
-
-## 2. LAYOUT DEFECT CHECKLIST
-For each category below, state any defect clearly and precisely. If none observed, write "✓ not observed".
-
-SPACING & ALIGNMENT — Misaligned elements, uneven gaps between siblings, unexpected margin/padding collapse, elements butting against container edges incorrectly?
-
-OVERFLOW & CLIPPING — Content cut off at a container edge, unwanted scrollbars appearing, content hidden behind a fixed/sticky element, text or images visually cropped?
-
-FLEX / GRID LAYOUT — Items failing to distribute correctly, wrong wrap behavior, flex children collapsing to zero, grid cells the wrong size, items not filling available space?
-
-Z-INDEX & STACKING — Elements overlapping in the wrong order, content hidden under another layer, tooltip/dropdown/modal not above its context, shadow or border clipped by stacking context?
-
-SIZING — Element too wide or too narrow (ignoring its container), too tall or too short, aspect ratio wrong, element not growing/shrinking as expected?
-
-TYPOGRAPHY — Text truncated with or without ellipsis, text overflowing its container, wrong font size or weight relative to surrounding text, baseline misalignment between adjacent text elements?
-
-COLOR & STYLE — Wrong background color, missing border or shadow, element showing default browser styling (no CSS applied), opacity or visibility wrong?
-
-COMPONENT STATE — Wrong state shown: error state when content is expected, loading spinner when data is ready, empty state placeholder still showing, disabled styling on an enabled element?
-
-RESPONSIVE / VIEWPORT — Elements reflowing, collapsing, or overflowing at the current viewport width in a way that looks unintentional?
-
-## 3. CSS ROOT-CAUSE INFERENCE
-For each defect found above, give the most likely CSS cause. Format:
-"[Defect] → [LIKELY|POSSIBLE] CAUSE: [CSS property or pattern]"
-
-Label each LIKELY (high visual confidence) or POSSIBLE (plausible but uncertain without code).
-
-## 4. COMPONENT OWNERSHIP
-For each defect, identify: (a) the visible element where the symptom appears, (b) the parent component most likely responsible, (c) whether the fix is in: inline styles | component CSS/Tailwind | shared stylesheet | parent layout container.
-
-## 5. TASK RELEVANCE
-Which defects are directly relevant to the task? What visual change is needed? Which component or CSS rule is the primary target?
-
-## 6. LIMITS
-What cannot be confirmed from this screenshot alone? What requires reading the source code? Be specific.
-
-Be direct and actionable. The developer must be able to open the right file and identify the right rule.`;
+  const promptText = buildVisionPrompt(intent, userPrompt, countLabel);
+  const maxTokens  = VISION_MAX_TOKENS[intent];
 
   const analysisMessages: Message[] = [
-    { role: "system", content: VISION_FIX_SYSTEM },
-    {
-      role: "user",
-      content: [
-        { type: "text", text: fixPromptText },
-        ...imageParts,
-      ],
-    },
+    { role: "system", content: systemMap[intent] },
+    { role: "user",   content: [{ type: "text", text: promptText }, ...imageParts] },
   ];
 
-  const result = await model.chat(analysisMessages, {
-    maxTokens:  3500,   // 6-section CSS defect report needs more room
-    taskHint:   "vision",
-  });
+  const result = await model.chat(analysisMessages, { maxTokens, taskHint: "vision" });
 
   logger.info(
-    { taskId, analysisLength: result.content.length, model: result.modelUsed, lane: result.laneUsed, intent },
-    "[VenomGPT] Visual analysis complete (fix path)"
+    { taskId, intent, analysisLength: result.content.length, model: result.modelUsed, lane: result.laneUsed, maxTokens },
+    `[VenomGPT] Visual analysis complete (${intent} path)`
   );
 
-  // Emit a truncated preview so the operator can see the analysis in the feed
   const preview = result.content.slice(0, 400) + (result.content.length > 400 ? "…" : "");
-  emit(taskId, "thought", `[INSPECTING] Visual analysis (${result.modelUsed ?? "vision model"}):\n${preview}`);
+  emit(taskId, "thought", `[INSPECTING] Visual analysis — ${intent} (${result.modelUsed ?? "vision model"}):\n${preview}`);
 
   return result.content;
 }
@@ -602,9 +699,9 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
   const taskId   = task.id;
   createTaskController(taskId);
 
-  // Stamp imageCount immediately so the UI can show it even while running
+  // Stamp imageCount and visualIntent immediately so the UI can show them
   if (taskMeta.isVisual) {
-    setTaskMeta(taskId, { imageCount: taskMeta.imageCount });
+    setTaskMeta(taskId, { imageCount: taskMeta.imageCount, visualIntent });
   }
 
   broadcastTaskUpdate(task);
@@ -680,29 +777,40 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
       // Build (or retrieve from cache) the project index and select files
       // likely relevant to this specific prompt. This replaces the raw
       // full-tree dump with a focused, metadata-enriched summary.
-      emit(taskId, "status", "Analysing workspace…");
+      //
+      // Skip for "describe" visual intent: user wants a direct answer from the
+      // screenshot — no file reading, writing, or CSS inspection needed.
+      // Skipping saves ~1–2s of I/O and avoids injecting irrelevant file context.
 
       let workspaceSnapshot = "";
       let projectIntelligence = "";
       let projectIndex: ProjectIndex | null = null;   // kept for visual debug file selection
 
-      try {
-        // Raw tree (root level only for large projects — kept for structure overview)
-        const entries = await listDirectory("");
-        workspaceSnapshot = formatDirectoryTree(entries);
+      const skipWorkspaceScan = taskMeta.isVisual && visualIntent === "describe";
 
-        // Project index with relevance scoring
-        const index = await getProjectIndex(wsRoot);
-        projectIndex = index;  // exposed for visual debug file selection below
-        const relevantFiles = selectRelevantFiles(index, prompt, 20);
-        projectIntelligence = buildProjectSummary(index, relevantFiles);
+      if (skipWorkspaceScan) {
+        emit(taskId, "status", "Describe intent — skipping workspace scan…");
+        logger.debug({ taskId, visualIntent }, "[VenomGPT] Workspace scan skipped (describe path)");
+      } else {
+        emit(taskId, "status", "Analysing workspace…");
+        try {
+          // Raw tree (root level only for large projects — kept for structure overview)
+          const entries = await listDirectory("");
+          workspaceSnapshot = formatDirectoryTree(entries);
 
-        emit(taskId, "status", `Workspace ready — ${index.totalFiles} files indexed`);
-        logger.debug({ taskId, totalFiles: index.totalFiles, relevantFiles: relevantFiles.length }, "Project index ready");
-      } catch (err) {
-        workspaceSnapshot = "(could not read workspace)";
-        projectIntelligence = "";
-        logger.warn({ taskId, err }, "Could not build project index — continuing");
+          // Project index with relevance scoring
+          const index = await getProjectIndex(wsRoot);
+          projectIndex = index;  // exposed for visual debug file selection below
+          const relevantFiles = selectRelevantFiles(index, prompt, 20);
+          projectIntelligence = buildProjectSummary(index, relevantFiles);
+
+          emit(taskId, "status", `Workspace ready — ${index.totalFiles} files indexed`);
+          logger.debug({ taskId, totalFiles: index.totalFiles, relevantFiles: relevantFiles.length }, "Project index ready");
+        } catch (err) {
+          workspaceSnapshot = "(could not read workspace)";
+          projectIntelligence = "";
+          logger.warn({ taskId, err }, "Could not build project index — continuing");
+        }
       }
 
       // ── Model initialization ──────────────────────────────────────────────
@@ -760,8 +868,7 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
         try {
           visualContext = await analyzeVisualContext(model, images, prompt, taskId, visualIntent);
           setTaskMeta(taskId, { visionStatus: "success" });
-          const intentLabel = visualIntent === "report" ? "report writing" : "code fix";
-          emit(taskId, "status", `Visual analysis complete (${intentLabel} path) — proceeding…`);
+          emit(taskId, "status", `Visual analysis complete [${visualIntent}] — proceeding…`);
         } catch (err) {
           const isModelError = err instanceof ModelError;
           const category = isModelError ? err.category : "unknown";
@@ -800,81 +907,160 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
       if (projectIntelligence) {
         userPromptParts.push(`Project intelligence:\n${projectIntelligence}`);
       }
-      userPromptParts.push(`File structure:\n${workspaceSnapshot}`);
+      if (workspaceSnapshot) {
+        userPromptParts.push(`File structure:\n${workspaceSnapshot}`);
+      }
 
       // ── Visual context + intent-appropriate protocol ──────────────────────
-      // Only injected when visual analysis actually succeeded.
-      // "report" intent → direct write protocol (no file inspection)
-      // "fix"    intent → CSS investigation protocol + file bridge
+      // Injected only when visual analysis succeeded.
+      // Each of the 5 intents gets a purpose-built protocol that matches what
+      // the user actually wants done — from a direct answer to a full CSS fix.
       if (visualContext) {
-        // 1. Visual analysis findings (both intents)
         userPromptParts.push(
-          `VISUAL ANALYSIS — ${taskMeta.imageCount} screenshot${taskMeta.imageCount > 1 ? "s" : ""} analysed:\n\n` +
+          `VISUAL ANALYSIS — ${taskMeta.imageCount} screenshot${taskMeta.imageCount > 1 ? "s" : ""} analysed (${visualIntent} intent):\n\n` +
           visualContext
         );
 
-        if (visualIntent === "report") {
-          // ── Report protocol: analyze → write file directly → verify ──────
-          // No CSS file investigation. No reading existing files.
-          // The agent has everything it needs from the visual analysis above.
-          userPromptParts.push(
-            `VISUAL REPORT PROTOCOL:
+        switch (visualIntent) {
+
+          case "describe": {
+            // ── Describe protocol: vision → respond directly → done ──────────
+            // Fastest possible path. No file reads, no file writes, no commands.
+            // The agent emits exactly one action: done.
+            userPromptParts.push(
+              `VISUAL DESCRIBE PROTOCOL:
+
+The visual analysis above contains everything needed to answer the user's question.
+
+STEP 1 — RESPOND: Use the done action immediately. Put your direct answer in the summary field.
+  • Answer the user's specific question based on the visual analysis.
+  • Quote visible error messages or text verbatim.
+  • If something cannot be determined from the screenshot, say so.
+  • Be concise and direct.
+
+Do NOT write files. Do NOT read files. Do NOT run commands. Respond with done immediately.`
+            );
+            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using describe protocol (direct answer)");
+            break;
+          }
+
+          case "report": {
+            // ── Report protocol: vision → write file → verify → done ─────────
+            // No CSS investigation. Write findings directly from visual analysis.
+            userPromptParts.push(
+              `VISUAL REPORT PROTOCOL:
 
 Your task is to write a file containing a grounded description of what was observed in the screenshot(s).
 
 STEP 1 — WRITE: Create the target file immediately. You do NOT need to read any existing files first.
   • Use only the OBSERVED section of the visual analysis as primary evidence.
   • Clearly label LIKELY INFERENCE items as inferences.
-  • Do NOT include claims from CANNOT CONFIRM unless you explicitly note the uncertainty.
+  • Do NOT include claims from CANNOT CONFIRM unless explicitly noting the uncertainty.
   • Do NOT invent system-internal failures, API errors, or root causes not visible in the screenshot.
 
 STEP 2 — VERIFY: Read the file back once to confirm the content was written correctly.
 
 STEP 3 — DONE: Report what was written with final_status "complete".
 
-IMPORTANT: Do NOT read existing code files. Do NOT run build commands. Do NOT scan the workspace. You have everything you need. Go directly to write_file.`
-          );
-          logger.debug({ taskId, visualIntent }, "[VenomGPT] Using report protocol (direct write)");
-
-        } else {
-          // ── Fix protocol: inspect CSS files → edit → verify ──────────────
-          // Code-aware file bridge scored by CSS/component relevance.
-          let fileBridgeSection = "";
-          if (projectIndex) {
-            const visualDebugFiles = selectVisualDebugFiles(projectIndex, prompt, 10);
-            if (visualDebugFiles.length > 0) {
-              fileBridgeSection =
-                `\nFILES TO INVESTIGATE (scored by visual-debug relevance):\n` +
-                visualDebugFiles.map((f) => `  ${f.path}`).join("\n");
-              logger.debug(
-                { taskId, fileCount: visualDebugFiles.length, files: visualDebugFiles.map((f) => f.path) },
-                "[VenomGPT] Visual debug file scan complete"
-              );
-            }
+Do NOT read existing code files. Do NOT run build commands. Go directly to write_file.`
+            );
+            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using report protocol (direct write)");
+            break;
           }
 
-          userPromptParts.push(
-            `VISUAL FIX PROTOCOL:${fileBridgeSection}
+          case "fix": {
+            // ── Fix protocol: vision → inspect CSS files → edit → verify ─────
+            // Code-aware file bridge scored by CSS/component relevance.
+            let fileBridgeSection = "";
+            if (projectIndex) {
+              const visualDebugFiles = selectVisualDebugFiles(projectIndex, prompt, 10);
+              if (visualDebugFiles.length > 0) {
+                fileBridgeSection =
+                  `\nFILES TO INVESTIGATE (scored by visual-debug relevance):\n` +
+                  visualDebugFiles.map((f) => `  ${f.path}`).join("\n");
+                logger.debug(
+                  { taskId, fileCount: visualDebugFiles.length, files: visualDebugFiles.map((f) => f.path) },
+                  "[VenomGPT] Visual debug file scan complete"
+                );
+              }
+            }
+            userPromptParts.push(
+              `VISUAL FIX PROTOCOL:${fileBridgeSection}
 
-How to execute a visual fix correctly:
+STEP 1 — PLANNING: Identify the specific defect(s) and CSS root-cause from the analysis. Plan which CSS property/component to fix BEFORE reading any code.
 
-STEP 1 — PLANNING: Read the visual analysis above. Identify the specific defect(s) and the CSS root-cause inference provided. Plan which CSS property/component you need to fix BEFORE reading any code.
-
-STEP 2 — INSPECTING: Read the listed files (or the most relevant subset) to find the exact CSS rule responsible. Do not read files unrelated to the defect. Match: defect type → likely CSS property → the file where that rule lives.
-
-  Defect type → where to look:
-  • Spacing/alignment → padding, margin, gap on the container or its children
+STEP 2 — INSPECTING: Read the listed files (most relevant subset) to find the exact CSS rule responsible.
+  Defect → where to look:
+  • Spacing/alignment → padding, margin, gap on container or children
   • Overflow/clipping → overflow: hidden, max-height, height on ancestor containers
-  • Flex/grid → display: flex/grid on the parent, then justify-content, align-items, flex-wrap, grid-template
+  • Flex/grid → display: flex/grid on parent, then justify-content, align-items, flex-wrap, grid-template
   • Z-index/stacking → position: relative/absolute/fixed, z-index, isolation: isolate
   • Sizing → width, height, min-*, max-*, flex-basis, flex-grow, flex-shrink
   • Typography → overflow, text-overflow: ellipsis, white-space: nowrap, max-width on text containers
   • State visibility → conditional class logic, display: none / visibility: hidden, opacity: 0
 
-STEP 3 — EDITING: Fix the CSS rule in the component that OWNS the layout (not a descendant symptom). Write the complete file content.
+STEP 3 — EDITING: Fix the CSS rule in the component that OWNS the layout. Write the complete file content.
 
-STEP 4 — VERIFYING: After writing, confirm the change targets the exact visual symptom described in the analysis. Your done action must cite: what was visually broken → which CSS rule you changed → how this resolves the observed defect.`
-          );
+STEP 4 — VERIFYING: Confirm the change targets the exact visual symptom. Done action must cite: what was broken → which rule changed → how it resolves the defect.`
+            );
+            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using fix protocol (CSS investigation)");
+            break;
+          }
+
+          case "improve": {
+            // ── Improve protocol: vision → explore files → implement → verify ─
+            // Broader than fix: finds enhancement opportunities, implements them.
+            let fileBridgeSection = "";
+            if (projectIndex) {
+              const visualDebugFiles = selectVisualDebugFiles(projectIndex, prompt, 8);
+              if (visualDebugFiles.length > 0) {
+                fileBridgeSection =
+                  `\nRELEVANT FILES (for exploration):\n` +
+                  visualDebugFiles.map((f) => `  ${f.path}`).join("\n");
+              }
+            }
+            userPromptParts.push(
+              `VISUAL IMPROVE PROTOCOL:${fileBridgeSection}
+
+The visual analysis above lists specific UI/UX improvement opportunities.
+
+STEP 1 — EXPLORE: Read the relevant component file(s) to understand the current implementation. Focus on the components shown in the screenshot.
+
+STEP 2 — IMPLEMENT: Apply the improvements from the analysis. Each change should be purposeful:
+  • Prefer Tailwind utility changes for spacing, color, typography.
+  • Prefer component structure changes for hierarchy or density issues.
+  • Prefer CSS variable changes for system-wide consistency.
+  Implement only improvements with clear visual benefit. Do not refactor unrelated code.
+
+STEP 3 — VERIFY: Read the changed file(s) back to confirm edits are correct.
+
+STEP 4 — DONE: Summarize what was improved and the expected visual result. Reference each improvement by its label from the analysis.`
+            );
+            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using improve protocol (explore + enhance)");
+            break;
+          }
+
+          case "analyze": {
+            // ── Analyze protocol: vision → write analysis or respond directly ─
+            // Comprehensive assessment. User may or may not want a file written.
+            userPromptParts.push(
+              `VISUAL ANALYZE PROTOCOL:
+
+The visual analysis above contains a structured assessment of the screenshot(s).
+
+Determine the most useful response format:
+• If the user asked for a written analysis/report → write it to a file directly, then verify, then done.
+• If the user wants a direct answer/assessment → use the done action with your analysis as the summary.
+
+Either way:
+  • Deliver the assessment from the visual analysis directly. Do not inspect CSS files unless the user explicitly asked to find a specific bug.
+  • Be comprehensive but focused. Cover both strengths and improvement areas.
+  • Label everything: state what is working, what needs improvement, and what the priority action is.
+  • Do not invent root causes that aren't visible in the screenshot.`
+            );
+            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using analyze protocol (assessment)");
+            break;
+          }
         }
       }
 

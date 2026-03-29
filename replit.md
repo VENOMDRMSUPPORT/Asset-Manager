@@ -117,20 +117,29 @@ Screenshot-driven task intake is fully implemented. Key behavior:
 - **UI**: Composer has a paperclip button (file picker), paste-from-clipboard support, JPEG compression (max 1280px, 85% quality), thumbnail strip, remove-per-image button. Max 5 images, max 4 MB each, max ~25 MB total payload.
 - **`GET /api/agent/capabilities`**: returns the full capability descriptor including `vision.capable`, `vision.primaryModel`, `vision.modelChain`, and `multimodal` flags. Uses `AI_INTEGRATIONS_OPENAI_API_KEY` (not `OPENAI_API_KEY`) for Replit presence check.
 
-### Screenshot-task intent routing (correction pass)
+### Screenshot-task intent routing (5-type taxonomy)
 
-Visual tasks are classified at intake by `classifyVisualIntent(prompt)`:
+Visual tasks are classified at intake by `classifyVisualIntent(prompt)` into one of 5 types.
+Classification uses a priority-ordered set of regex rules; the first matching rule wins.
+`visualIntent` is stored in task metadata (`AgentTask.visualIntent`) and visible in API responses.
 
-- **`"report"` intent** — prompts matching "write/create/save… a file/report" or "describe/document/log… the error/issue/screen":
-  - Uses `VISION_REPORT_SYSTEM` + a 3-section grounded prompt (OBSERVED / LIKELY INFERENCE / CANNOT CONFIRM)
-  - `maxTokens: 1200` — fast, focused, no CSS forensics
-  - Agent protocol: **analyze → write file directly → verify → done** (no CSS file inspection step)
-  - Agent is explicitly told: "Do NOT read existing code files. Go directly to write_file."
+| Intent | Prompt patterns | Vision prompt | maxTokens | Agent protocol | Speed |
+|---|---|---|---|---|---|
+| `describe` | "what is this?", "explain…", "tell me about…" | Natural language explanation | 700 | vision → done (0 file ops) | Fastest: 14–20s |
+| `report` | "write a file…", "document this…", "save a report" | 3-section grounded (OBSERVED/INFERENCE/CANNOT CONFIRM) | 1200 | vision → write_file → verify → done | 40–55s |
+| `fix` | "fix this…", "broken", "misaligned", "bug" | 5-section CSS defect forensics | 2500 | vision → inspect files → edit → verify | 60–90s |
+| `improve` | "improve…", "make better", "enhance…", "suggestions" | 5 prioritized improvement items | 1800 | vision → explore files → implement → verify | 60–90s |
+| `analyze` | "analyze…", "audit…", "review…", "assess…" | 4-section balanced assessment | 1800 | vision → respond directly or write file | 45–65s |
 
-- **`"fix"` intent** — all other visual tasks (default):
-  - Uses `VISION_FIX_SYSTEM` + the original 6-section CSS defect report
-  - `maxTokens: 3500` — full forensics for CSS debugging
-  - Agent protocol: **plan → inspect CSS files → edit → verify** (unchanged)
+**Classification priority**: report → improve → analyze → fix → describe → default(fix)  
+FIX runs before DESCRIBE so "why is X misaligned" routes to fix, not describe.
+
+**`describe` path optimizations**:
+- Workspace scan skipped (no files needed) — saves ~1–2s I/O
+- No project index built
+- No file context injected into agent prompt
+- Agent emits exactly 1 action: `done`
+- Vision model only needs 700 tokens → faster model call
 
 Grounding rules enforced by `VISION_REPORT_SYSTEM`:
 - OBSERVED: only verbatim visible facts, no inference
