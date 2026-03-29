@@ -193,7 +193,9 @@ function categorizeError(err: unknown): ModelError {
 
   if (/base_url|baseurl|invalid url/i.test(msg)) {
     return new ModelError(
-      "Invalid base URL — check ZAI_BASE_URL in .env (must be https://api.z.ai/api/paas/v4/).",
+      "Invalid base URL — check ZAI_BASE_URL in .env. " +
+      "Standard accounts: https://api.z.ai/api/paas/v4/ — " +
+      "GLM Coding Plan subscribers: https://api.z.ai/api/coding/paas/v4/",
       "base_url_error",
       msg
     );
@@ -207,15 +209,42 @@ function categorizeError(err: unknown): ModelError {
 }
 
 // ─── Z.AI lane constants ──────────────────────────────────────────────────────
+//
+// Official Z.AI documentation:
+//   PAAS (OpenAI-compatible) base URL : https://api.z.ai/api/paas/v4/
+//   Anthropic-compatible base URL     : https://api.z.ai/api/anthropic
+//   GLM Coding Plan PAAS endpoint     : https://api.z.ai/api/coding/paas/v4/
+//
+// Source: https://docs.z.ai/api-reference/introduction
+//         https://docs.z.ai/scenario-example/develop-tools/claude
+//         https://docs.z.ai/scenario-example/develop-tools/goose
+//
+// Auth:
+//   PAAS lane      — Authorization: Bearer <key>  (handled by OpenAI SDK)
+//   Anthropic lane — x-api-key: <key>             (Anthropic SDK convention, confirmed working)
+//
+// NOTE: The Anthropic base URL does NOT include /v1.
+// Claude Code and Goose both use https://api.z.ai/api/anthropic as the base.
+// The Anthropic SDK (and our fetch calls) append /v1/messages to form the full path.
 
-const ZAI_PAAS_BASE_URL_DEFAULT = "https://api.z.ai/api/paas/v4/";
-const ZAI_ANTHROPIC_BASE_URL_DEFAULT = "https://api.z.ai/api/anthropic/v1";
-const ANTHROPIC_VERSION = "2023-06-01";
+const ZAI_PAAS_BASE_URL_DEFAULT      = "https://api.z.ai/api/paas/v4/";
+const ZAI_ANTHROPIC_BASE_URL_DEFAULT  = "https://api.z.ai/api/anthropic";
+const ANTHROPIC_VERSION               = "2023-06-01";
 
+/**
+ * Derives the Anthropic-compatible base URL from the PAAS base URL.
+ * Both lanes share the same host (api.z.ai), so we only need ZAI_BASE_URL
+ * to configure the PAAS lane — the Anthropic lane URL is derived automatically.
+ *
+ * PAAS: https://api.z.ai/api/paas/v4/  →  Anthropic: https://api.z.ai/api/anthropic
+ * GLM Coding Plan: https://api.z.ai/api/coding/paas/v4/  →  Anthropic: https://api.z.ai/api/anthropic
+ */
 function deriveAnthropicBaseURL(paasBaseURL: string): string {
   try {
     const url = new URL(paasBaseURL);
-    return `${url.protocol}//${url.host}/api/anthropic/v1`;
+    // Use only the host — the Anthropic path is always /api/anthropic regardless of
+    // whether the user is on the standard PAAS or GLM Coding Plan PAAS endpoint.
+    return `${url.protocol}//${url.host}/api/anthropic`;
   } catch {
     return ZAI_ANTHROPIC_BASE_URL_DEFAULT;
   }
@@ -346,7 +375,9 @@ async function callAnthropicLane(
   if (system) body["system"] = system;
   if (options.temperature !== undefined) body["temperature"] = options.temperature;
 
-  const url = `${anthropicBaseURL.replace(/\/$/, "")}/messages`;
+  // Anthropic base URL from docs: https://api.z.ai/api/anthropic
+  // Full messages endpoint:       https://api.z.ai/api/anthropic/v1/messages
+  const url = `${anthropicBaseURL.replace(/\/$/, "")}/v1/messages`;
 
   let response: Response;
   try {
@@ -418,7 +449,9 @@ async function callAnthropicLaneStream(
   if (system) body["system"] = system;
   if (options.temperature !== undefined) body["temperature"] = options.temperature;
 
-  const url = `${anthropicBaseURL.replace(/\/$/, "")}/messages`;
+  // Anthropic base URL from docs: https://api.z.ai/api/anthropic
+  // Full messages endpoint:       https://api.z.ai/api/anthropic/v1/messages
+  const url = `${anthropicBaseURL.replace(/\/$/, "")}/v1/messages`;
 
   let response: Response;
   try {

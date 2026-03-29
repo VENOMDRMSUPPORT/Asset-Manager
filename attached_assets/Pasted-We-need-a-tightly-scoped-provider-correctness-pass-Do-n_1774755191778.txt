@@ -1,0 +1,129 @@
+We need a tightly scoped provider-correctness pass.
+
+Do not guess.
+Do not rely on stale assumptions.
+Do not rely on previous prompt wording if it conflicts with the current official Z.AI docs.
+Do not stop at analysis.
+
+## Goal
+
+Audit the current Z.AI integration against the **current official Z.AI documentation directly from z.ai docs**, then correct the repo so the implementation and setup guidance match the real documented API behavior.
+
+## Context
+
+We now have a hard signal that the Anthropic-compatible path works in real testing, while the OpenAI-compatible / PAAS path is the path currently in question.
+
+This means the repo may still contain one or more incorrect assumptions about:
+
+* base URLs
+* endpoint paths
+* auth header format
+* environment variables
+* lane/model expectations
+* setup examples
+
+This pass is about **provider correctness**, not capability expansion.
+
+## Required source of truth
+
+You must inspect the official Z.AI documentation directly from the source.
+
+At minimum, inspect the relevant official docs/pages for:
+
+* Anthropic-compatible API usage
+* OpenAI-compatible API usage
+* authentication/header requirements
+* base URLs
+* model/lane expectations if documented
+* any official examples relevant to text/chat requests
+* any official error-code guidance relevant to auth / permission / entitlement mismatches
+
+Do not assume the previous implementation is correct.
+Do not assume the current `.env.example` is correct.
+Do not assume old project comments are correct.
+
+## Required job
+
+1. Audit the current VenomGPT Z.AI integration against the official Z.AI docs.
+2. Determine the **correct documented way** to call:
+
+   * Anthropic-compatible path
+   * OpenAI-compatible path
+3. Compare that to the current implementation and env/config examples in the repo.
+4. Correct the repo where it is wrong or misleading.
+5. Update `.env.example` so it reflects the real documented setup.
+6. Preserve the currently working path.
+7. Do not introduce guesses or placeholder config expectations.
+
+## Scope
+
+Inspect and fix only what is necessary around:
+
+* Z.AI provider integration
+* base URLs
+* endpoint paths
+* auth headers
+* env variable expectations
+* `.env.example`
+* directly related provider docs/comments/config in the repo
+
+Do not drift into unrelated refactors.
+Do not expand providers.
+Do not open a new product phase.
+Do not redesign the whole routing system unless a very small direct correction is required.
+
+## Ground rule
+
+If the official Z.AI docs contradict the current repo, the docs win.
+If the current repo contradicts real local testing, reconcile the mismatch and explain it clearly.
+
+## Verification required
+
+You must verify locally and report real evidence.
+
+At minimum, verify:
+
+1. Anthropic-compatible text request using the correct documented method
+2. OpenAI-compatible text request using the correct documented method
+3. whether the current OpenAI-compatible path is:
+
+   * implemented correctly and working
+   * or incorrect in repo logic/config
+   * or blocked by account/provider constraints
+4. `.env.example` after correction
+5. TypeScript/build checks
+6. no regression to normal text/file/command task behavior
+
+Use real evidence:
+
+* exact docs consulted
+* exact curl commands used
+* actual outputs
+* actual changed files
+* actual local verification
+
+## Important constraints
+
+Do not:
+
+* invent env variables
+* assume header formats
+* assume endpoint paths
+* claim success without local verification
+* broaden the phase into multimodal redesign
+* re-open unrelated architecture work
+
+## Final response format
+
+1. What official Z.AI docs I checked
+2. What the correct documented API usage is
+3. What was wrong or misleading in the repo before
+4. What I changed
+5. Anthropic-compatible verification result
+6. OpenAI-compatible verification result
+7. `.env.example` corrections
+8. Files changed
+9. Remaining risks / blocked items
+
+Do not stop at analysis.
+Read the official Z.AI docs directly, make the code/config corrections, verify locally, and report real results.
