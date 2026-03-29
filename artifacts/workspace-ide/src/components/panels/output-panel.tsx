@@ -5,6 +5,7 @@ import {
   Eye, FileEdit, Settings, Trash2, FileCheck, GitBranch,
   ShieldAlert, Zap, Copy, Check, ChevronRight, Search,
   Wrench, Loader2, ChevronDown, MapPin, ListChecks,
+  RotateCcw, DatabaseBackup,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -26,6 +27,23 @@ interface FailureData {
   detail?: string;
   step?: string;
   category?: string;
+}
+
+interface CheckpointFileSummary {
+  path: string;
+  existed: boolean;
+  snapshotAt: string;
+  originalBytes: number;
+}
+
+interface CheckpointData {
+  taskId: string;
+  createdAt: string;
+  status: 'pending' | 'applied' | 'discarded';
+  appliedAt?: string;
+  discardedAt?: string;
+  files: CheckpointFileSummary[];
+  fileCount: number;
 }
 
 // ─── Stage parsing ────────────────────────────────────────────────────────────
@@ -160,10 +178,12 @@ export function OutputPanel() {
     else    { setCopyFailed(true); setTimeout(() => setCopyFailed(false), 2500); }
   }, [activeTab, agentLogs, terminalOutput]);
 
-  const doneLog        = agentLogs.findLast(l => l.type === 'done');
+  const doneLog           = agentLogs.findLast(l => l.type === 'done');
   const completionData: CompletionData | null = doneLog?.data ?? null;
-  const lastErrorLog   = agentLogs.findLast(l => l.type === 'error' && l.data?.category);
+  const lastErrorLog      = agentLogs.findLast(l => l.type === 'error' && l.data?.category);
   const failureData: FailureData | null = (!doneLog && lastErrorLog?.data) ? lastErrorLog.data as FailureData : null;
+  const checkpointLog     = agentLogs.findLast(l => l.type === 'checkpoint');
+  const checkpointData: CheckpointData | null = checkpointLog?.data ? checkpointLog.data as unknown as CheckpointData : null;
 
   const commandCount = agentLogs.filter(l => l.type === 'command').length;
   const repairCount  = agentLogs.filter(l => l.type === 'thought' && parseThought(l.message).stage === 'REPAIRING').length;
@@ -252,6 +272,12 @@ export function OutputPanel() {
               <CompletionCard data={completionData} repairCount={repairCount} />
             )}
 
+            {/* Checkpoint panel — shown after completion when task wrote files.
+                Provides real Discard/Accept controls backed by live API calls. */}
+            {checkpointData && (
+              <CheckpointCard data={checkpointData} />
+            )}
+
             {userScrolled && agentLogs.length > 0 && (
               <button
                 onClick={() => { setUserScrolled(false); agentEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }}
@@ -285,7 +311,9 @@ export function OutputPanel() {
 // ─── Individual log item ──────────────────────────────────────────────────────
 
 function AgentLogItem({ log }: { log: AgentLogEvent }) {
-  if (log.type === 'done') return null;
+  // These event types are extracted and rendered outside the main log flow
+  if (log.type === 'done')       return null;
+  if (log.type === 'checkpoint') return null;  // rendered as CheckpointCard below CompletionCard
 
   // Thought events get special stage-aware rendering
   if (log.type === 'thought') {
@@ -649,6 +677,167 @@ function CompletionCard({ data, repairCount }: { data: CompletionData; repairCou
         <div className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
           <span className="font-semibold">Remaining: </span>{data.remaining}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Checkpoint card ──────────────────────────────────────────────────────────
+// Rendered after the CompletionCard when the task wrote at least one file.
+// Shows snapshotted files and lets the operator discard or accept the changes.
+
+function CheckpointCard({ data }: { data: CheckpointData }) {
+  const [status, setStatus]   = useState<CheckpointData['status']>(data.status);
+  const [loading, setLoading] = useState<'discard' | 'apply' | null>(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [restored, setRestored] = useState<string[]>([]);
+
+  const taskId = data.taskId;
+  const isPending = status === 'pending';
+
+  const handleDiscard = async () => {
+    setLoading('discard');
+    setError(null);
+    try {
+      const res = await fetch(`/api/agent/tasks/${taskId}/discard`, { method: 'POST' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message ?? 'Discard failed');
+      setStatus('discarded');
+      setRestored(body.restoredFiles ?? []);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleApply = async () => {
+    setLoading('apply');
+    setError(null);
+    try {
+      const res = await fetch(`/api/agent/tasks/${taskId}/apply`, { method: 'POST' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message ?? 'Apply failed');
+      setStatus('applied');
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const borderColor =
+    status === 'discarded' ? 'border-amber-500/30 bg-amber-500/5' :
+    status === 'applied'   ? 'border-green-500/30 bg-green-500/5'  :
+                             'border-blue-500/30 bg-blue-500/5';
+
+  const statusBadge =
+    status === 'discarded'
+      ? <span className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">Discarded</span>
+      : status === 'applied'
+        ? <span className="text-xs text-green-400 bg-green-400/10 border border-green-400/20 px-2 py-0.5 rounded-full">Accepted</span>
+        : <span className="text-xs text-blue-400 bg-blue-400/10 border border-blue-400/20 px-2 py-0.5 rounded-full">Pending review</span>;
+
+  return (
+    <div className={`rounded-lg border p-3 space-y-2 mt-1.5 ${borderColor}`}>
+      {/* Header */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <DatabaseBackup className="w-4 h-4 text-blue-400 shrink-0" />
+        <span className="font-semibold text-sm text-foreground">Task Checkpoint</span>
+        <span className="text-muted-foreground text-xs">·</span>
+        <span className="text-xs text-muted-foreground">{data.fileCount} file{data.fileCount !== 1 ? 's' : ''} snapshotted before editing</span>
+        <div className="ml-auto">{statusBadge}</div>
+      </div>
+
+      {/* File list */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+          <FileCheck className="w-3.5 h-3.5" />
+          Pre-task snapshots
+        </p>
+        <ul className="space-y-0.5">
+          {data.files.map((f, i) => (
+            <li key={i} className="flex items-center gap-2 text-xs font-mono px-1.5 py-0.5 rounded bg-panel-border/30">
+              <span className={f.existed ? 'text-blue-400/70' : 'text-emerald-400/70 font-bold'}>
+                {f.existed ? '~' : '+'}
+              </span>
+              <span className={`flex-1 truncate ${f.existed ? 'text-blue-200/80' : 'text-emerald-200/80'}`}>
+                {f.path}
+              </span>
+              {!f.existed && (
+                <span className="text-emerald-400/50 text-[10px] shrink-0">new file</span>
+              )}
+              {f.existed && (
+                <span className="text-blue-400/30 text-[10px] shrink-0">{(f.originalBytes / 1024).toFixed(1)}k original</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Error message */}
+      {error && (
+        <div className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded px-2 py-1">
+          {error}
+        </div>
+      )}
+
+      {/* Action buttons (only visible while pending) */}
+      {isPending && (
+        <div className="flex gap-2 pt-0.5">
+          <button
+            onClick={handleDiscard}
+            disabled={loading !== null}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded border border-red-500/40 text-red-400 bg-red-500/8 hover:bg-red-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading === 'discard'
+              ? <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+              : <RotateCcw className="w-3 h-3 shrink-0" />
+            }
+            Discard Changes
+          </button>
+          <button
+            onClick={handleApply}
+            disabled={loading !== null}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded border border-green-500/40 text-green-400 bg-green-500/8 hover:bg-green-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading === 'apply'
+              ? <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+              : <Check className="w-3 h-3 shrink-0" />
+            }
+            Accept Changes
+          </button>
+        </div>
+      )}
+
+      {/* Post-action confirmation */}
+      {status === 'applied' && (
+        <p className="text-xs text-green-400/80 flex items-center gap-1.5">
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+          Changes accepted — files are permanently modified.
+        </p>
+      )}
+      {status === 'discarded' && (
+        <div className="text-xs text-amber-400/80 space-y-0.5">
+          <p className="flex items-center gap-1.5">
+            <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+            Changes discarded — {restored.length > 0 ? `${restored.length} file(s) restored to pre-task state` : 'files restored'}.
+          </p>
+          {restored.length > 0 && (
+            <ul className="pl-5 space-y-0.5">
+              {restored.map((f, i) => (
+                <li key={i} className="font-mono text-amber-300/60">{f}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Honest limitation notice */}
+      {isPending && (
+        <p className="text-[10px] text-muted-foreground/40 pt-0.5">
+          Snapshots are in-memory only — discard is available until server restart.
+        </p>
       )}
     </div>
   );

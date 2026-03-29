@@ -36,6 +36,7 @@ import { runPlanningPhase, formatPlanForContext } from "./orchestrator/planner.j
 import { gateAction, updateStateAfterAction, recordShellReadBlocked } from "./orchestrator/actionRouter.js";
 import { createRunState }                    from "./orchestrator/types.js";
 import type { RunState }                     from "./orchestrator/types.js";
+import { snapshotFileForTask, getCheckpoint, serializeCheckpoint } from "./orchestrator/checkpoint.js";
 
 // ─── Event helpers ────────────────────────────────────────────────────────────
 
@@ -1304,6 +1305,8 @@ Do not read files speculatively. Do not read files to "understand the codebase".
       const MAX_CONSECUTIVE_REPAIRS = 3;
       let lastSummary = "Agent reached maximum steps without completing the task.";
       let completion: TaskCompletion | undefined;
+      /** True once the checkpoint event has been emitted — prevents double-emission. */
+      let checkpointEmitted = false;
 
       // ── Agent loop ────────────────────────────────────────────────────────
       while (runState.step < runState.maxSteps) {
@@ -1502,8 +1505,49 @@ Do not read files speculatively. Do not read files to "understand the codebase".
             final_status:  finalStatus,
             remaining,
           });
+
+          // ── Checkpoint event (Phase 10) ─────────────────────────────────────
+          // If this task wrote any files, emit a checkpoint event so the operator
+          // can see what was snapshotted and choose to discard or accept the changes.
+          // The event data is a serialised CheckpointSummary (no content blobs).
+          const taskCp = getCheckpoint(taskId);
+          if (taskCp && taskCp.snapshots.size > 0) {
+            const cpSummary = serializeCheckpoint(taskCp);
+            const n = taskCp.snapshots.size;
+            emit(
+              taskId, "checkpoint",
+              `${n} file${n !== 1 ? "s" : ""} snapshotted — discard or accept changes via the checkpoint panel`,
+              cpSummary as unknown as Record<string, unknown>,
+            );
+            logger.info(
+              { taskId, fileCount: n, files: [...taskCp.snapshots.keys()] },
+              "[Checkpoint] Checkpoint event emitted at task done",
+            );
+            checkpointEmitted = true;
+          }
+
           updateStateAfterAction(runState, action, true);
           break;
+        }
+
+        // ── Pre-write snapshot (Phase 10 checkpoint foundation) ──────────────
+        // Before a write_file executes, capture the original file content into
+        // the task's checkpoint. This is the real safety mechanism: the snapshot
+        // makes full rollback possible after the task completes.
+        // Idempotent: snapshotting the same file twice keeps only the first snapshot.
+        if (actionType === "write_file" && wsRoot) {
+          const writePath = String(action["path"] ?? "");
+          if (writePath) {
+            try {
+              await snapshotFileForTask(taskId, writePath, wsRoot);
+            } catch (snapshotErr) {
+              // Never let snapshot failure block the write — log and continue
+              logger.warn(
+                { taskId, writePath, err: snapshotErr },
+                "[Checkpoint] Snapshot failed — continuing without checkpoint for this file",
+              );
+            }
+          }
         }
 
         // ── Execute action ──────────────────────────────────────────────────
@@ -1580,6 +1624,28 @@ Do not read files speculatively. Do not read files to "understand the codebase".
             final_status:  "partial",
             remaining:     "Hit the step limit before task was verified complete.",
           };
+        }
+      }
+
+      // ── Post-loop checkpoint event (step-limit / abort paths) ─────────────
+      // If the model-driven "done" action was NOT reached (step limit, etc.)
+      // but the task wrote files, emit the checkpoint event here so the operator
+      // can still discard or accept the partial changes.
+      // Guard prevents double-emission when done action already fired it.
+      if (!checkpointEmitted) {
+        const postLoopCp = getCheckpoint(taskId);
+        if (postLoopCp && postLoopCp.snapshots.size > 0) {
+          const cpSummary = serializeCheckpoint(postLoopCp);
+          const n = postLoopCp.snapshots.size;
+          emit(
+            taskId, "checkpoint",
+            `${n} file${n !== 1 ? "s" : ""} snapshotted (partial task) — discard or accept via the checkpoint panel`,
+            cpSummary as unknown as Record<string, unknown>,
+          );
+          logger.info(
+            { taskId, fileCount: n },
+            "[Checkpoint] Checkpoint event emitted at step limit / abort",
+          );
         }
       }
 

@@ -1,0 +1,216 @@
+Phase 10 should now begin.
+
+VenomGPT has already completed major progress in:
+
+* execution-oriented task handling
+* screenshot analysis and screenshot-to-code targeting
+* orchestration architecture upgrade
+* safe execution control tightening
+
+So the next major gap is no longer “basic orchestration.”
+
+The next major gap is this:
+
+**VenomGPT still edits directly against the selected workspace with no true task isolation, no checkpointed safe-apply flow, and no reliable rollback/discard model.**
+
+That is no longer acceptable if the product is meant to move materially closer to Replit-grade orchestration.
+
+This is a large, bounded **Phase 10 — Task Isolation + Checkpoints Foundation Pass**.
+
+## Current state
+
+VenomGPT already has:
+
+* routed orchestration profiles
+* planning for edit-oriented tasks
+* action routing / gating
+* execution feed and task history
+* screenshot-aware execution paths
+* stronger execution control than before
+
+However, it still lacks one of the most important trust layers:
+
+When a task edits code, it is still working too directly against the live selected workspace.
+
+That means the product still lacks a serious foundation for:
+
+* safer experimentation
+* rollback/discard confidence
+* checkpointed edits
+* controlled apply behavior
+* clearer trust boundaries during real coding tasks
+
+## Job
+
+Implement a major but bounded isolation/checkpoint foundation for VenomGPT.
+
+Do not stop at analysis.
+
+Make the code changes.
+
+## Goal
+
+Move VenomGPT from:
+
+* direct live workspace mutation as the dominant editing model
+
+toward:
+
+* safer task-oriented execution with checkpointed control
+
+This phase does NOT need to become a full Git/branch platform.
+
+But it DOES need to create a real foundation for safer task execution.
+
+## Required outcomes
+
+1. Introduce a task-isolation or checkpoint foundation that materially improves safety over the current direct-write model.
+
+2. A code-edit task should no longer feel like uncontrolled blind mutation of the live workspace.
+
+3. The system should have a real concept of:
+
+   * task-scoped change tracking
+   * checkpoint or pre-edit snapshot
+   * controlled apply / confirm / discard / rollback path
+     where appropriate for the current architecture
+
+4. The implementation should improve trust without destroying existing working flows.
+
+5. The operator should be able to understand what was isolated, what changed, and what can be reverted or applied.
+
+6. Existing task classes must still work:
+
+   * text tasks
+   * file-edit tasks
+   * command tasks
+   * screenshot-related tasks
+   * task history / execution feed
+
+## Important direction
+
+You must think like a systems engineer here.
+
+I do NOT want a fake “checkpoint” label with no real effect.
+
+I do NOT want decorative safety language.
+
+I want a real technical foundation that materially improves task safety.
+
+Use your judgment on the best architecture-consistent version of this now, for example where appropriate:
+
+* task workspace clone
+* temp task copy
+* staged patch/apply model
+* pre-edit snapshots
+* reversible write tracking
+* discard/revert path
+* checkpoint metadata per task
+* operator-visible change summary
+* safe apply after verification
+
+You do not need to implement every possible mechanism.
+
+You do need to implement enough real functionality that the product meaningfully advances.
+
+## Implementation requirements
+
+1. Keep the implementation aligned with the current architecture.
+
+2. Do not attempt to build an entire Git platform.
+
+3. Do not hide behind future architecture notes or TODOs.
+
+4. Do not add fake rollback/checkpoint UI with no backing behavior.
+
+5. Preserve current execution-oriented flows as much as possible.
+
+6. If isolation is partial or bounded, make that explicit and implement it honestly.
+
+7. If some task classes should remain direct while edit-oriented tasks gain checkpointing, make that distinction clearly and intentionally.
+
+8. If a diff/apply or pre-edit snapshot model is the best bounded move, implement it properly.
+
+9. If rollback/discard is supported, it must actually work.
+
+10. Operator-facing visibility should clearly communicate:
+
+    * what was changed
+    * what is checkpointed
+    * what is isolated
+    * what was applied
+    * what can be reverted/discarded
+
+## Strong preference
+
+This pass should be bold.
+
+Do not under-scope it into a tiny patch.
+
+This phase should create the first real safety layer that makes VenomGPT feel more trustworthy during real code-edit tasks.
+
+## Guardrails
+
+Do NOT turn this into:
+
+* a deploy/platform phase
+* broad integrations/MCP work
+* a huge UI redesign
+* fake Git branch theater
+* a documentation-only pass
+* analysis without implementation
+
+This is a task-isolation / checkpoint foundation pass.
+
+## Verification requirements
+
+You must verify with real evidence, not claims.
+
+At minimum, verify all of the following locally:
+
+1. A normal text-only task still works.
+2. A file-edit task still works.
+3. A command/verification task still works.
+4. A screenshot-related task still works.
+5. A code-edit task now uses the new isolation/checkpoint behavior in a real way.
+6. A discard/revert/rollback or safe-apply path is demonstrated if implemented.
+7. The operator can understand what happened from the product surface, logs, or other visible evidence.
+
+## Required proof
+
+I want stronger proof than a plain text report.
+
+Use whatever combination gives the strongest evidence, for example:
+
+* browser-visible UI proof
+* task feed evidence
+* screenshots
+* before/after file state proof
+* logs
+* change summaries
+* exact commands run
+* any local visual/browser verification that demonstrates the new safety behavior clearly
+
+If browser-visible proof is possible, include it.
+
+If a different proof path is stronger, use that.
+
+I care about convincing evidence, not a particular format.
+
+## Final response format
+
+1. What I built
+2. Why direct workspace mutation was no longer enough
+3. The new isolation/checkpoint model
+4. What task types now use it
+5. What operator-visible controls/status now exist
+6. Files changed
+7. Verification performed
+8. Strongest evidence that the safety layer is real
+9. Remaining limitations before this would be considered truly Replit-grade
+
+Important instruction
+
+Do not stop at analysis.
+Do not give me an architectural proposal instead of implementation.
+Make the code changes, implement a real task-isolation/checkpoint foundation, and verify it with strong evidence.

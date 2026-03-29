@@ -4,6 +4,7 @@ import workspaceRouter from "./workspace.js";
 import filesRouter from "./files.js";
 import agentRouter from "./agent.js";
 import settingsRouter from "./settings.js";
+import checkpointRouter from "./checkpoint.js";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use(workspaceRouter);
 router.use(filesRouter);
 router.use(agentRouter);
 router.use(settingsRouter);
+router.use(checkpointRouter);
 
 export default router;

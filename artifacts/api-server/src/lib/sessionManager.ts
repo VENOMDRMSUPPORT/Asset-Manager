@@ -14,7 +14,14 @@ export type AgentEventType =
   /** Emitted once at task start with the resolved execution profile (category, caps). */
   | "route"
   /** Emitted after the planning phase with the structured execution plan. */
-  | "plan";
+  | "plan"
+  /**
+   * Emitted at task completion when the task wrote at least one file.
+   * Contains a serialised CheckpointSummary — file list, status, timestamps.
+   * The operator can call POST /api/agent/tasks/:id/discard to revert all changes,
+   * or POST /api/agent/tasks/:id/apply to mark them as permanently accepted.
+   */
+  | "checkpoint";
 
 export interface AgentEvent {
   type: AgentEventType;
