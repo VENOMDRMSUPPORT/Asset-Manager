@@ -1,12 +1,17 @@
 /**
- * orchestrator/taskRouter.ts — Task classification and execution profile selection.
+ * @module orchestrator/taskRouter
  *
- * Maps each incoming task (prompt + visual context) to an execution profile that
- * defines its step budget, file-access caps, verification requirements, and
- * whether a planning phase runs before the main loop.
+ * Task categories and their descriptions:
  *
- * This replaces the implicit "all tasks get 25 steps and unlimited file reads"
- * model with intentional, per-category execution strategies.
+ * 1. conversational  — Direct response, no file access
+ * 2. visual_describe — Describe screenshot, answer only, no file access
+ * 3. visual_report   — Write findings file then verify
+ * 4. visual_fix      — Inspect ≤2 files, write fix, verify
+ * 5. visual_improve  — Inspect ≤2 files, implement improvements, verify
+ * 6. visual_analyze  — Structured assessment, optional 1-file read
+ * 7. code_edit       — Full loop with planning phase and verification
+ * 8. code_verify     — Read and run commands, no writes
+ * 9. text_explain    — Read relevant context, answer, done
  */
 
 import type { VisualIntent } from "../agentLoop.js";
@@ -28,7 +33,7 @@ const PROFILE_CONFIGS: Record<TaskCategory, Omit<ExecutionProfile, "category">> 
     description: "Visual improve — inspect ≤2 files, implement improvements, verify" },
   visual_analyze:  { maxSteps:  5, maxFileReads: 1, maxFileWrites: 0, requiresVerify: false, planningPhase: false,
     description: "Visual analyze — structured assessment, optional 1-file read" },
-  code_edit:       { maxSteps: 25, maxFileReads: 10, maxFileWrites: 8, requiresVerify: true, planningPhase: true,
+  code_edit:       { maxSteps: 25, maxFileReads: 10, maxFileWrites: 8, requiresVerify: true,  planningPhase: true,
     description: "Code editing — full loop with planning phase and verification" },
   code_verify:     { maxSteps:  8, maxFileReads:  5, maxFileWrites: 0, requiresVerify: false, planningPhase: false,
     description: "Verification/inspection — read and run commands, no writes" },

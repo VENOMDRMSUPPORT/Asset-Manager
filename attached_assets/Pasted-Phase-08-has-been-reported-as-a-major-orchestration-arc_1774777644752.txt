@@ -1,0 +1,137 @@
+Phase 08 has been reported as a major orchestration architecture leap.
+
+We are not accepting that claim based on architecture description alone.
+
+This is now a **Phase 08 Validation Pass**.
+
+## Current claim being tested
+
+The reported changes introduce a real orchestration upgrade, including:
+
+* task routing
+* execution profiles
+* planning phase
+* action routing / gating
+* structured run-state phases
+* route/plan visibility in the task feed
+* more disciplined execution behavior than the old single-loop model
+
+That is what we need to validate.
+
+## Job
+
+Run a real local validation pass for the current Phase 08 implementation.
+
+Do not implement a new feature phase in this pass unless a small obvious break prevents the validation itself from running.
+
+Do not broaden scope.
+
+Your job is to verify whether the current repository state now delivers meaningfully stronger orchestration behavior in real tasks.
+
+## Validation goal
+
+We want to prove or disprove this statement:
+
+**VenomGPT now behaves in a materially more structured, disciplined, and controllable way than the previous linear orchestration model.**
+
+## What must be tested
+
+You must validate the new orchestration structure on multiple task types, not only one happy-path code edit.
+
+At minimum, test all of the following:
+
+1. **Text-only task**
+
+   * confirm the route event
+   * confirm planning is skipped when appropriate
+   * confirm the task completes cleanly
+
+2. **Simple code-edit task**
+
+   * confirm route event
+   * confirm planning phase appears when appropriate
+   * confirm the plan is structured and useful
+   * confirm execution follows the plan in a disciplined way
+
+3. **Command / verification-heavy task**
+
+   * confirm routing, execution, and verification behavior are all visible
+   * confirm the system does not mark completion before verification
+
+4. **Repair-after-failure task**
+
+   * give it a task where the first attempt is likely to fail or where verification should force repair
+   * confirm the orchestration structure handles repair more cleanly than the old loop
+
+5. **Screenshot-related task**
+
+   * confirm the visual path still works under the new orchestration structure
+   * confirm the route/plan/action structure does not break screenshot behavior
+
+6. **Longer-running or more complex task**
+
+   * validate that the system remains understandable and controlled, not just “still working”
+
+## What must be verified
+
+1. The new route event is real and useful.
+2. The new plan event is real and useful where appropriate.
+3. Different task categories are actually treated differently.
+4. Execution is more disciplined than before.
+5. Verification is still enforced honestly.
+6. The new orchestration structure is visible in logs / task feed / task state.
+7. Existing working capabilities were not regressed.
+
+## What counts as real improvement
+
+We are looking for real behavioral evidence such as:
+
+* different routing profiles by task type
+* planning only where justified
+* clearer execution stages
+* fewer wasted reads or less wandering
+* more structured repair behavior
+* better completion discipline
+* clearer operator visibility
+
+Not enough:
+
+* architecture notes
+* refactor claims
+* one trivial route event
+* pretty feed output without behavioral difference
+
+## Required evidence
+
+Show the validation with concrete proof, not just summary claims.
+
+You must provide:
+
+* exact prompts/tasks used
+* route output for each tested task type
+* plan output where applicable
+* execution/task-feed evidence
+* whether verification/repair occurred
+* screenshots if useful
+* logs if useful
+* exact commands run
+
+## Acceptance rule
+
+Phase 08 should be considered validated only if the evidence shows that the new orchestration architecture materially changes real task behavior, not just internal structure.
+
+If validation is mixed, say so clearly.
+
+## Final response format
+
+1. Tasks used for validation
+2. Route behavior by task type
+3. Plan behavior by task type
+4. Evidence of improved execution discipline
+5. Evidence of verification / repair behavior
+6. Screenshot-task regression result
+7. Remaining weak spots
+8. Validate / partially validate / reject Phase 08
+
+Do not stop at analysis.
+Run the validation pass and report the real result.
