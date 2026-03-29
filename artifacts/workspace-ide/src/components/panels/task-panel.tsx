@@ -560,7 +560,7 @@ export function TaskPanel() {
             onChange={handleFileInputChange}
           />
 
-          {/* Textarea */}
+          {/* Textarea — pr-20 leaves room for attach + send buttons */}
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -571,12 +571,22 @@ export function TaskPanel() {
                 ? 'Agent is working…'
                 : 'Describe what you want to build or fix.\nPaste or attach screenshots • ⌘/Ctrl+Enter to submit.'
             }
-            className="w-full h-[96px] bg-background border border-panel-border rounded-xl p-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none transition-all"
+            className="w-full h-[96px] bg-background border border-panel-border rounded-xl p-3 pr-20 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none transition-all"
             disabled={isRunning}
           />
 
-          {/* Send button */}
-          <div className="absolute bottom-3 right-3">
+          {/* Action buttons — attach (paperclip) + send, both inside the textarea */}
+          <div className="absolute bottom-3 right-3 flex items-center gap-1">
+            {!isRunning && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-panel-border/40 transition-colors"
+                title="Attach screenshots (or paste)"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+            )}
             <button
               type="submit"
               disabled={!prompt.trim() || isRunning}
@@ -632,21 +642,6 @@ export function TaskPanel() {
           </div>
         )}
 
-        {/* Attach button row (only visible when no images yet + not running) */}
-        {attachedImages.length === 0 && !isRunning && (
-          <div className="mt-1.5 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-              title="Attach screenshots"
-            >
-              <Paperclip className="w-3 h-3" />
-              Attach screenshots
-            </button>
-            <span className="text-[10px] text-muted-foreground/50">or paste</span>
-          </div>
-        )}
       </div>
     </div>
   );

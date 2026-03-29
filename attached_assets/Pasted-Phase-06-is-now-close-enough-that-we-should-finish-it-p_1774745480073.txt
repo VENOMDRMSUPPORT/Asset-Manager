@@ -1,0 +1,186 @@
+Phase 06 is now close enough that we should finish it properly with one final bounded pass.
+
+This is NOT a new broad phase.
+This is a focused **Phase 06 Closeout + Stabilization Pass** to eliminate the remaining blockers and bring the current multimodal work to an acceptance-ready state.
+
+## Current state
+
+VenomGPT now appears to have real Phase 06 work in place, including:
+
+* screenshot attachment / paste support in the composer
+* multimodal submission path improvements
+* visual task detection and visual-analysis stage wiring
+* backend routing work for image-assisted tasks
+* earlier payload-size submission failure improved enough that screenshot tasks now reach the visual-analysis stage
+
+So the problem is no longer “basic multimodal plumbing.”
+
+The current weakness is now:
+
+**runtime reliability and product-grade behavior for the current multimodal path.**
+
+## Remaining issues we want to close in this pass
+
+1. Screenshot-driven tasks can now reach `visual_analysis`, but the current vision route is still brittle in real runtime conditions.
+
+   * model/lane/account entitlement reality is not being handled in a dependable product-grade way
+   * the system can still fail in a way that feels too internal and too fragile
+
+2. The recent multimodal passes introduced a visible UI/layout regression.
+
+   * even if multimodal behavior improves, this is not acceptable as the final state of the phase
+
+## Job
+
+Implement a final bounded closeout pass for Phase 06.
+
+Do not redesign the whole app.
+Do not start a new phase.
+Do not drift into broad multimodal expansion.
+
+Make focused code changes, verify them locally, and report real results.
+
+---
+
+# Part 1 — Visual Runtime Stabilization
+
+## Goal
+
+Make screenshot-driven tasks behave dependably under real provider/account conditions.
+
+## Requirements
+
+* stop assuming that “vision-capable in theory” means “usable right now”
+* improve routing and fallback behavior for real runtime/provider/account/lane availability
+* preserve honest evidence-based reporting
+* do not fake successful image analysis
+* do not silently drop screenshots and pretend the task was handled correctly
+* improve the product behavior when visual analysis is unavailable
+
+We want one of these two acceptable outcomes:
+
+### A) Real visual success
+
+A screenshot-driven task uses a genuinely usable visual-analysis path and proceeds successfully.
+
+### B) Graceful honest degradation
+
+If no genuinely usable vision path exists for the current provider/account/lane setup, the system behaves cleanly and professionally:
+
+* no brittle crash-like behavior
+* no misleading fake success
+* no ugly internal-feeling dump
+* clear user-facing explanation
+* stable task lifecycle
+* preserved trust
+
+Either A or B is acceptable for this pass.
+
+What is NOT acceptable:
+
+* visual_analysis starts and then collapses badly because the chosen model path was never truly usable
+* repeated brittle entitlement-style failure as the default screenshot experience
+* pretending the screenshot was analyzed when it was not
+
+---
+
+# Part 2 — UI Regression Recovery
+
+## Goal
+
+Restore a balanced, readable, professional workspace/task layout after the recent multimodal changes.
+
+## Requirements
+
+* fix the visible UI/layout regression introduced during the recent passes
+* preserve the useful screenshot attachment/paste UX if it is not itself the cause of the regression
+* restore a balanced operator/workspace/task surface
+* improve readability and scanning
+* keep the interface feeling stable and professional
+* do not turn this into a broad redesign experiment
+
+We want:
+
+* a workspace that feels usable again
+* multimodal additions that feel integrated rather than disruptive
+* no “feature added, product got worse” outcome
+
+---
+
+# Part 3 — Preserve Existing Strengths
+
+## Goal
+
+Do not break what is already working while closing Phase 06.
+
+## Requirements
+
+Preserve:
+
+* text-only task behavior
+* existing file/command execution behavior
+* task lifecycle handling
+* current evidence/reporting discipline
+* screenshot attachment/paste affordances where they are useful
+* the submission reliability improvements already made
+
+Do not regress back to:
+
+* payload-size submission failure
+* broken screenshot submission flow
+* fake-success behavior
+* unstable UI/task handling
+
+---
+
+# Guardrails
+
+Do NOT use this pass to:
+
+* start a broad new multimodal architecture phase
+* add image generation
+* add audio/video
+* expand providers broadly for its own sake
+* redesign the entire interface
+* weaken honest error reporting
+* hide entitlement/runtime problems instead of handling them properly
+
+This is a closeout/stabilization pass for the current Phase 06 work only.
+
+---
+
+# Verification required
+
+You must verify all of the following locally:
+
+1. normal text-only task
+2. screenshot-driven task with the current real provider/account setup
+3. confirm that screenshot tasks now either:
+
+   * complete through a genuinely usable visual path
+   * or degrade gracefully and honestly without brittle failure behavior
+4. confirm the recent UI regression is fixed
+5. confirm the workspace/task/operator layout is again balanced and usable
+6. confirm the earlier payload-size submission failure does not return
+7. confirm logs and task reporting make visual routing/fallback behavior understandable
+
+Also report clearly whether:
+
+* the current account truly supports a usable visual-analysis path now
+* or whether graceful degradation is the correct accepted product behavior under the current entitlement reality
+
+---
+
+# Final response format
+
+1. What I changed
+2. Why this closeout pass was needed
+3. How screenshot-task runtime behavior works now
+4. How routing/fallback behavior was improved
+5. How the UI regression was corrected
+6. Files changed
+7. Verification performed
+8. Remaining risks / what is intentionally deferred
+
+Do not stop at analysis.
+Make the code changes, run the verification, and report the real results.
