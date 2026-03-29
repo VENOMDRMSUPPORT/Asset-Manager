@@ -1,0 +1,246 @@
+VenomGPT now needs a major closure pass across the remaining orchestration trust gap.
+
+This is NOT a new feature phase.
+This is NOT a UI phase.
+This is NOT a documentation pass.
+This is NOT a plan-only session.
+
+This is a large, bounded **Orchestration Closure Pass** intended to close the major remaining debt from the recent orchestration architecture, safe execution control, and checkpoint foundation phases.
+
+## Current state
+
+VenomGPT already has substantial progress in place:
+
+* routed orchestration profiles
+* selective planning
+* action routing / gating
+* structured execution visibility
+* stronger execution discipline than the earlier linear loop
+* screenshot analysis and screenshot-to-code targeting
+* safer execution control improvements
+* checkpoint/apply/discard foundation
+* operator-facing checkpoint surface
+
+So the project is no longer blocked on MVP behavior.
+
+But it is also not yet fully closed in the areas that most affect orchestration trustworthiness.
+
+## The actual remaining problem
+
+The product still has unresolved debt across the last three major phases.
+
+The remaining gap is this:
+
+**VenomGPT still does not fully behave like a tightly controlled, trustworthy orchestration system under real code-edit and long-running task conditions.**
+
+The missing closure is spread across three related areas:
+
+### 1. Phase 08 debt — orchestration discipline still needs stronger real-world closure
+
+The new route/plan/state model exists, but it still needs tighter behavioral completion under complex tasks, longer-running tasks, and anti-wandering discipline.
+
+### 2. Phase 09 debt — execution control is stronger, but not fully airtight
+
+Some important control surfaces were tightened, but execution trust is still not fully closed until shell/tool/runtime behavior is governed more comprehensively and low-cost tasks consistently avoid unnecessary heavy execution paths.
+
+### 3. Phase 10 debt — checkpointing landed, but full task isolation has not
+
+Checkpoint/apply/discard is real, but the product still lacks a sufficiently real isolated mutation model for code-edit tasks. It is still too close to direct live-workspace mutation.
+
+## Job
+
+Implement a single heavy closure pass that closes the most important remaining debt across Phase 08, Phase 09, and Phase 10.
+
+Do not stop at analysis.
+
+Make the code changes.
+
+## Goal
+
+Make VenomGPT materially more trustworthy as an orchestration system by closing the remaining gap in:
+
+* orchestration discipline
+* execution control
+* isolated edit safety
+
+This pass should not be a small patch.
+
+It should be a serious architectural and behavioral closeout pass.
+
+## Required outcomes
+
+### A. Close the remaining orchestration-discipline debt
+
+1. The route/plan/state architecture must not just exist — it must govern real behavior more tightly under non-trivial tasks.
+
+2. Complex and longer-running tasks should show:
+
+   * less wandering
+   * clearer bounded execution
+   * more intentional progression
+   * stronger phase ownership
+   * clearer completion/repair behavior
+
+3. If execution profiles or run-state handling still need tightening to achieve this, implement it.
+
+### B. Close the remaining execution-control debt
+
+4. Execution control must become harder to bypass and easier to trust.
+
+5. Any remaining loopholes or weak control surfaces around shell/tool/file access should be reduced materially.
+
+6. Low-cost factual/conversational tasks should consistently avoid unnecessary heavy orchestration work.
+
+7. Operator-visible limit/gate behavior must remain understandable and honest.
+
+### C. Close the remaining task-safety debt
+
+8. Code-edit tasks must gain a more real isolated mutation model than “edit live workspace directly and maybe restore later.”
+
+9. Implement a real bounded isolation layer or staged mutation layer for edit-oriented tasks, aligned with the current architecture.
+
+10. A code-edit task should have a meaningfully safer flow such as:
+
+* task-scoped isolated working copy
+* staged write/apply model
+* or another architecture-consistent equivalent
+
+11. Checkpoint/apply/discard must integrate with this model cleanly.
+
+12. The operator must be able to understand:
+
+* what is isolated
+* what is staged
+* what is applied
+* what is discarded/reverted
+* what changed and where
+
+## Important direction
+
+I want a real closure pass, not three separate mini-fixes.
+
+You must think like a strong systems engineer.
+
+Choose the architecture moves that actually close the gap in a meaningful way, while staying bounded and shippable.
+
+Do not under-scope this.
+
+Do not give me “foundation only” again.
+
+I want closure-level work on the most important remaining debt.
+
+## Implementation requirements
+
+1. Keep the implementation aligned with the current architecture.
+   Improve it substantially, but do not destroy working foundations.
+
+2. Do not give me architecture notes or TODOs instead of implementation.
+
+3. Do not fake isolation.
+   If you claim task isolation or staged mutation, it must be real.
+
+4. Do not weaken existing safety controls in order to make tasks “feel smoother.”
+
+5. Preserve all currently working task classes:
+
+   * conversational tasks
+   * text explanation tasks
+   * file-edit tasks
+   * command/verification tasks
+   * screenshot-related tasks
+   * task history / execution feed
+
+6. If you introduce a staged or isolated edit model, it must work end to end.
+
+7. If you tighten orchestration further, it must produce observable behavioral improvement, not only internal code reorganization.
+
+8. If you tighten execution control further, it must be backed by real runtime behavior and not only policy labels.
+
+9. Keep the operator-facing visibility strong.
+   The user should be able to understand the safer orchestration flow.
+
+10. If browser-visible proof is possible, use it.
+    I specifically want strong evidence, not just a textual summary.
+
+## Strong preference
+
+I want you to be bold here.
+
+This is the pass where VenomGPT should stop feeling like a promising orchestration prototype and start feeling like a system with a serious trust layer.
+
+Do not play small.
+
+At the same time:
+do not let boldness turn into chaos or fake platform theater.
+
+## Guardrails
+
+Do NOT turn this into:
+
+* a broad platform/deploy phase
+* MCP/integrations phase
+* a UI redesign phase
+* a documentation-only pass
+* a fake Git system
+* a pile of decorative controls with no real behavioral effect
+* analysis without implementation
+
+This is an orchestration trust closure pass.
+
+## Verification requirements
+
+You must verify with real evidence, not claims.
+
+At minimum, verify all of the following locally:
+
+1. A conversational/factual task still works and avoids unnecessary heavy orchestration.
+
+2. A file-edit task works through the new safer edit/isolation/checkpoint flow.
+
+3. A command/verification task still works with honest control behavior.
+
+4. A screenshot-related task still works under the tightened orchestration/control model.
+
+5. A more complex or longer-running task shows more disciplined behavior than before.
+
+6. A discard/revert or apply flow is demonstrated on a real task.
+
+7. The operator can see and understand the safer orchestration behavior from logs, feed, UI, or browser-visible proof.
+
+## Required proof
+
+I want strong proof.
+
+Use the strongest combination you can, including where useful:
+
+* browser-visible proof
+* screenshot proof
+* task-feed proof
+* logs
+* before/after file state
+* discard/apply demonstration
+* step/route/plan evidence
+* exact commands run
+* real local task runs
+
+Do not give me a weak report when stronger proof is available.
+
+If the browser testing capability is available, use it.
+
+## Final response format
+
+1. What I built
+2. What debt from Phase 08 / 09 / 10 is now closed
+3. The final orchestration/control/isolation model now in place
+4. What operator-visible behavior now proves the system is safer and more disciplined
+5. Files changed
+6. Verification performed
+7. Strongest proof that the closure is real
+8. What still remains before VenomGPT could honestly be called very close to Replit-grade orchestration
+
+Important instruction
+
+Do not stop at analysis.
+Do not split this into a future plan.
+Do not give me foundation-only work.
+Make the code changes, close the major remaining debt for real, and verify it with strong evidence.
