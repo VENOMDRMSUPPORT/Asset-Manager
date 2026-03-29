@@ -112,7 +112,7 @@ function RunningTaskBanner({
   const stageColor = stageMeta?.color ?? 'text-primary';
 
   return (
-    <div className="mx-4 mt-3 mb-0 rounded-xl border border-primary/25 bg-primary/8 overflow-hidden shrink-0">
+    <div className="mx-2 mt-2 mb-0 rounded-lg border border-primary/25 bg-primary/8 overflow-hidden shrink-0">
       {/* Main status row */}
       <div className="flex items-center justify-between px-3 py-2.5">
         <div className="flex items-center gap-2">
@@ -375,12 +375,12 @@ export function TaskPanel() {
     <div className="bg-panel flex flex-col h-full overflow-hidden" style={{ gridArea: 'taskbar' }}>
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div className="h-12 border-b border-panel-border flex items-center px-4 shrink-0 bg-background/50">
-        <h2 className="text-sm font-semibold flex items-center gap-2 text-foreground">
-          <Bot className="w-4 h-4 text-primary" />
-          VenomGPT
+      <div className="h-10 border-b border-panel-border flex items-center px-3 shrink-0 bg-background/50">
+        <h2 className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+          <Bot className="w-3.5 h-3.5 text-primary" />
+          Task History
         </h2>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1.5">
           {workspace?.root && (
             <button
               onClick={() => {
@@ -389,16 +389,18 @@ export function TaskPanel() {
                   setWorkspace({ data: { root: newPath.trim() } });
                 }
               }}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              title="Switch workspace"
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              title={`Switch workspace — current: ${workspace.root}`}
             >
-              <FolderOpen className="w-3 h-3 text-primary/60" />
-              <span className="font-mono truncate max-w-[120px]">{workspace.root.split('/').pop() || workspace.root}</span>
+              <FolderOpen className="w-3 h-3 text-primary/60 shrink-0" />
+              <span className="font-mono truncate max-w-[72px]">{workspace.root.split('/').pop() || workspace.root}</span>
             </button>
           )}
-          <div className="w-px h-3.5 bg-panel-border" />
-          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-          <span className="text-xs text-muted-foreground">{isConnected ? 'Connected' : 'Offline'}</span>
+          <div className="w-px h-3 bg-panel-border" />
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}
+            title={isConnected ? 'Backend connected' : 'Backend disconnected'}
+          />
         </div>
       </div>
 
@@ -411,18 +413,15 @@ export function TaskPanel() {
         )}
 
         {/* Task history */}
-        <div className="flex-1 p-3 pt-4">
-          <h3 className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest mb-3 flex items-center gap-2 px-1">
-            <Activity className="w-3 h-3" />
-            Task History
-            {tasks.length > 0 && (
-              <span className="ml-auto normal-case font-normal tracking-normal text-muted-foreground/40">
-                {tasks.length}
-              </span>
-            )}
-          </h3>
+        <div className="flex-1 p-2 pt-3">
+          {tasks.length > 0 && (
+            <div className="text-[10px] font-semibold text-muted-foreground/40 uppercase tracking-widest mb-2 flex items-center gap-1.5 px-1">
+              <Activity className="w-2.5 h-2.5" />
+              <span>{tasks.length} task{tasks.length !== 1 ? 's' : ''}</span>
+            </div>
+          )}
 
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             {isLoadingHistory ? (
               <div className="flex justify-center p-6">
                 <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
@@ -455,10 +454,10 @@ export function TaskPanel() {
                           : 'bg-background/60 hover:bg-background border-panel-border'
                       }`}
                   >
-                    <div className="p-2.5 cursor-pointer" onClick={() => handleTaskClick(task)}>
+                    <div className="p-2 cursor-pointer" onClick={() => handleTaskClick(task)}>
                       {/* Prompt */}
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <p className="text-[13px] font-medium text-foreground line-clamp-2 leading-snug flex-1">
+                      <div className="flex items-start justify-between gap-1.5 mb-1.5">
+                        <p className="text-[12px] font-medium text-foreground truncate leading-snug flex-1" title={task.prompt}>
                           {task.prompt}
                         </p>
                         <div className="flex items-center gap-1 shrink-0 mt-0.5">
@@ -490,8 +489,8 @@ export function TaskPanel() {
                       </div>
 
                       {/* Meta row */}
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] text-muted-foreground/50">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="text-[10px] text-muted-foreground/50 truncate">
                           {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
                         </span>
                         <div className="flex items-center gap-1.5">
@@ -598,7 +597,7 @@ export function TaskPanel() {
                 ? 'Agent is working…'
                 : 'Describe what you want to build or fix.\nPaste or attach screenshots • ⌘/Ctrl+Enter to submit.'
             }
-            className="w-full h-[96px] bg-background border border-panel-border rounded-xl p-3 pr-20 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none transition-all"
+            className="w-full h-[80px] bg-background border border-panel-border rounded-lg p-2.5 pr-20 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none transition-all"
             disabled={isRunning}
           />
 

@@ -4,7 +4,7 @@ import {
   Terminal, Activity, CheckCircle2, AlertCircle, PlayCircle,
   Eye, FileEdit, Settings, Trash2, FileCheck, GitBranch,
   ShieldAlert, Zap, Copy, Check, ChevronRight, Search,
-  Wrench, Loader2,
+  Wrench, Loader2, ChevronDown,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -57,6 +57,41 @@ const STAGE_STYLE: Record<StageTag, { color: string; bg: string; border: string;
   REPAIRING:    { color: 'text-amber-400',   bg: 'bg-amber-400/10',   border: 'border-amber-400/25',   icon: Wrench },
   'WRAPPING UP':{ color: 'text-green-400',   bg: 'bg-green-400/10',   border: 'border-green-400/25',   icon: CheckCircle2 },
 };
+
+// ─── Log segmentation ─────────────────────────────────────────────────────────
+// Groups ≥ 3 consecutive file_read events into a collapsible row so the feed
+// doesn't balloon with dozens of individual read lines — matches Replit's
+// "grouped action" presentation style.
+
+type LogSegment =
+  | { kind: 'single'; log: AgentLogEvent }
+  | { kind: 'file_read_group'; logs: AgentLogEvent[] };
+
+function segmentLogs(logs: AgentLogEvent[]): LogSegment[] {
+  const out: LogSegment[] = [];
+  let i = 0;
+  while (i < logs.length) {
+    if (logs[i].type === 'file_read') {
+      const group: AgentLogEvent[] = [logs[i]];
+      let j = i + 1;
+      while (j < logs.length && logs[j].type === 'file_read') {
+        group.push(logs[j]);
+        j++;
+      }
+      if (group.length >= 3) {
+        out.push({ kind: 'file_read_group', logs: group });
+        i = j;
+      } else {
+        group.forEach(l => out.push({ kind: 'single', log: l }));
+        i = j;
+      }
+    } else {
+      out.push({ kind: 'single', log: logs[i] });
+      i++;
+    }
+  }
+  return out;
+}
 
 // ─── Clipboard helper ─────────────────────────────────────────────────────────
 
@@ -204,9 +239,11 @@ export function OutputPanel() {
                   : 'No task selected. Submit a task or click one from history to see activity.'}
               </div>
             ) : (
-              agentLogs.map((log) => (
-                <AgentLogItem key={log.id} log={log} />
-              ))
+              segmentLogs(agentLogs).map((seg, i) =>
+                seg.kind === 'file_read_group'
+                  ? <FileReadGroup key={`grp-${i}`} logs={seg.logs} />
+                  : <AgentLogItem key={seg.log.id} log={seg.log} />
+              )
             )}
 
             {failureData && <FailureCard data={failureData} />}
@@ -362,6 +399,44 @@ function ThoughtItem({ log }: { log: AgentLogEvent }) {
       <Settings className="w-3 h-3 shrink-0 text-gray-400/40" />
       {body && <span className="truncate flex-1">{body}</span>}
       <Timestamp ts={log.timestamp} />
+    </div>
+  );
+}
+
+// ─── File-read group (collapsed) ─────────────────────────────────────────────
+// Renders ≥ 3 consecutive file_read events as a single collapsible badge row,
+// reducing visual clutter in the feed.
+
+function FileReadGroup({ logs }: { logs: AgentLogEvent[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const last = logs[logs.length - 1];
+  return (
+    <div className="rounded border border-purple-400/10 overflow-hidden">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center gap-2 px-2 py-1 text-xs text-purple-300/70 hover:bg-purple-400/5 transition-colors"
+      >
+        <Eye className="w-3 h-3 shrink-0 text-purple-400/70" />
+        <span className="font-mono flex-1 text-left">
+          {logs.length} files read
+        </span>
+        <Timestamp ts={last.timestamp} />
+        {expanded
+          ? <ChevronDown className="w-3 h-3 shrink-0 text-purple-400/40" />
+          : <ChevronRight className="w-3 h-3 shrink-0 text-purple-400/40" />
+        }
+      </button>
+      {expanded && (
+        <div className="border-t border-purple-400/10 bg-[#0a0a0c] divide-y divide-purple-400/5">
+          {logs.map(l => (
+            <div key={l.id} className="flex items-center gap-2 px-3 py-0.5 text-xs">
+              <Eye className="w-2.5 h-2.5 shrink-0 text-purple-400/40" />
+              <span className="text-purple-300/60 font-mono truncate flex-1">{l.message}</span>
+              <Timestamp ts={l.timestamp} />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

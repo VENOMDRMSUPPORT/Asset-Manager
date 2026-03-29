@@ -1,0 +1,192 @@
+This is a bounded UI/layout correction pass for VenomGPT.
+
+## Context
+VenomGPT should visually and behaviorally align much more closely with the original Replit workspace layout shown in the reference video and screenshots.
+The current UI is poor mainly because the right-side Task History panel takes more space than it should, the layout hierarchy feels imbalanced, and the Execution Feed does not resemble Replit’s execution/activity presentation closely enough.
+
+This pass is specifically about reproducing the Replit-style workspace structure, proportions, and panel behavior as closely as possible within VenomGPT’s current product identity and constraints.
+
+## Current confirmed state
+- VenomGPT already has the major workspace regions present: left file explorer, center editor/empty-state area, right task history, and a bottom execution/terminal region.
+- The current Task History panel is oversized relative to the center workspace.
+- The current Execution Feed does not yet match the Replit-style feed structure, density, icon usage, row rhythm, and activity presentation closely enough.
+- The UI already uses a dark workspace-oriented shell and is conceptually close to the target product class.
+- The goal is not to invent a new layout, but to make VenomGPT follow the original Replit workspace layout and interaction style much more faithfully.
+
+## Problem to solve now
+Correct the VenomGPT workspace layout so it follows the original Replit workspace hierarchy much more closely:
+
+1. The center workspace must visually dominate.
+2. The right Task History column must be narrower and behave like a secondary rail, not a competing main panel.
+3. The bottom Execution Feed must behave and look much closer to Replit’s feed/activity area.
+4. Sent tasks should appear in a Replit-like feed style with similar visual rhythm, icon treatment, density, status treatment, and action grouping.
+5. The overall layout must feel like Replit’s original workspace structure, not a loose inspiration.
+
+## What this pass is NOT
+- Do not redesign the entire product.
+- Do not change core business logic, backend task execution, or agent routing unless needed for UI wiring.
+- Do not introduce a brand-new layout concept.
+- Do not make the right panel large just to fit more content.
+- Do not simplify the activity feed into generic chat bubbles.
+- Do not replace the execution feed with a standard messaging UI.
+- Do not drift into feature expansion, animations-first redesign, or styling experiments unrelated to matching Replit’s layout behavior.
+- Do not stop at analysis. Make the code changes, run the verification, and report the real results.
+
+## Required outcomes
+- Rebalance the workspace so the center editor/work area is the dominant region.
+- Reduce the visual weight and width of the Task History rail so it behaves like Replit’s secondary right rail.
+- Rebuild or restyle the Execution Feed so it presents activity in a Replit-like way:
+  - task/activity blocks
+  - compact stacked rows
+  - subtle grouping of actions
+  - execution-oriented cards/rows rather than chat messages
+  - small utility icons similar in spirit to Replit
+  - clear but compact status signals
+- Preserve a Replit-like shell structure:
+  - top workspace header
+  - left explorer
+  - main center workspace
+  - right task history rail
+  - bottom execution/terminal zone
+- Ensure the feed content shown after submitting a task feels operational, not conversational.
+- Match spacing, panel proportions, density, and visual hierarchy to the reference as closely as practical.
+
+## Implementation requirements
+### 1) Layout hierarchy must follow Replit
+Implement the workspace using a Replit-like multi-panel shell:
+- Left explorer rail/panel
+- Large center workspace
+- Narrow right task history rail
+- Bottom execution/terminal section attached to the center workspace
+
+The center area must clearly be the dominant region.
+The right panel must not visually compete with the center.
+
+### 2) Right Task History rail sizing
+Correct the right rail so it behaves like a narrow secondary column.
+Target behavior:
+- It should be noticeably narrower than it is now.
+- It should hold compact task cards with truncation and controlled wrapping.
+- It should not consume space intended for the main workspace.
+- It should maintain usability without becoming the visual focus.
+
+Use a width model closer to a fixed or tightly clamped rail rather than an aggressively flexible panel.
+Prefer something in the spirit of a narrow rail, not a full content pane.
+
+### 3) Center workspace dominance
+The center workspace must expand naturally and retain maximum usable width.
+The empty editor/file state should remain centered and calm, similar to the Replit reference.
+Do not let the Task History or side rails squeeze the workspace too much.
+
+### 4) Bottom Execution Feed structure
+The bottom panel must be treated as an execution/activity surface, not a generic output box.
+Follow Replit’s visual model as closely as possible:
+- top tab strip for “Execution Feed” and “Terminal”
+- compact dark panel body
+- feed items stacked vertically with tight spacing
+- action groups that look like operational steps
+- compact inline metadata where applicable
+- consistent row padding and readable density
+- execution-first presentation rather than conversational presentation
+
+### 5) Replit-like feed item design
+When a task is submitted, the resulting items in the Execution Feed should resemble Replit’s activity cards/rows as closely as possible:
+- compact blocks
+- small icon chips/buttons for actions/tools
+- grouped action badges
+- minimal but clear status indicators
+- subtle borders/background separation
+- strong density control
+- no oversized message bubbles
+- no bloated padding
+- no wide empty gaps between entries
+
+The feed should support patterns similar to:
+- thought/update block
+- action/tool block
+- grouped action count
+- status/result row
+- review-ready or completion row
+
+### 6) Icon treatment
+Use iconography that is visually similar in role and scale to Replit’s UI:
+- small utility icons
+- compact action pills/chips
+- subtle status icons
+- restrained icon sizing
+- consistent icon alignment
+
+If there are attached reference icons, use them where appropriate.
+If exact assets are unavailable, use the closest equivalents already available in the codebase/icon library while preserving the Replit-like structure and proportions.
+
+### 7) Typography and density
+Match the Replit-like density and hierarchy:
+- compact labels
+- restrained heading sizes
+- muted secondary metadata
+- tight vertical rhythm
+- careful truncation for long task titles
+- balanced line-height so cards remain compact
+
+### 8) Panel styling
+Follow the Replit workspace feel:
+- dark neutral surfaces
+- subtle borders/dividers
+- low-contrast panel separation
+- restrained accent usage
+- selected/active tab treatment similar in feel to Replit
+- no flashy gradients or decorative effects unless already part of the product shell and very subdued
+
+### 9) Behavior requirements
+- Sending a task should cause the execution area to present structured operational entries, not just plain text.
+- The feed should remain readable under multiple stacked updates.
+- Long task titles should truncate gracefully.
+- Action groups should remain compact and aligned.
+- The bottom area must feel like a real execution surface tied to the active task.
+
+### 10) Fidelity requirement
+Use the provided video/screenshots as the visual source of truth for:
+- panel proportions
+- column dominance
+- feed density
+- icon scale
+- spacing rhythm
+- task history compactness
+- execution feed structure
+
+Do not approximate loosely if the reference makes the intended structure obvious.
+
+## Verification required
+1. Confirm the final workspace visually preserves this hierarchy:
+   - left explorer
+   - dominant center workspace
+   - narrow right task history rail
+   - bottom execution/terminal panel
+
+2. Confirm the right Task History rail is materially narrower than before and no longer dominates the layout.
+
+3. Confirm the center workspace now has more width and is visually the primary focus.
+
+4. Confirm the Execution Feed presents submitted tasks in a Replit-like operational format rather than generic chat/message styling.
+
+5. Confirm feed items use compact spacing, grouped actions, and small icon treatment similar in spirit to the reference.
+
+6. Confirm long task titles in the history rail truncate or wrap in a controlled, compact way without expanding card height excessively.
+
+7. Confirm the top/bottom/side panel borders and spacing create a Replit-like workspace structure.
+
+8. Run the relevant frontend build/typecheck and report the real result.
+
+9. Provide before/after screenshots of the corrected layout if possible.
+
+## Final response format
+1. What I changed
+2. Why this pass was needed
+3. How the layout works now
+4. How the Execution Feed now mirrors Replit more closely
+5. Files changed
+6. Verification performed
+7. Remaining gaps versus the reference
+8. Any attached assets used (icons, screenshots, video)
+
+Do not stop at analysis. Make the code changes, run the verification, and report the real results.

@@ -108,8 +108,8 @@
 
   .ide-grid {
     display: grid;
-    grid-template-columns: 220px 1fr 340px;
-    grid-template-rows: 48px 1fr 260px;
+    grid-template-columns: 220px 1fr 240px;
+    grid-template-rows: 48px 1fr 240px;
     grid-template-areas:
       "header header header"
       "sidebar editor taskbar"
