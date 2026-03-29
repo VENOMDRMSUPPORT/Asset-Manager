@@ -392,6 +392,163 @@ export function selectVisualDebugFiles(
     .map(({ file }) => file);
 }
 
+// ─── Visual keyword extraction ────────────────────────────────────────────────
+//
+// Parses the vision model's analysis text to extract file-selection signals:
+//   • CamelCase words → likely component names (e.g. TaskPanel → task-panel)
+//   • Known UI region terms mentioned anywhere in the analysis
+//   • Quoted file references (e.g. `task-panel.tsx`)
+//
+// These terms are used by selectVisualAwareFiles() to score files against both
+// the user's original prompt AND the richer vocabulary in the vision output.
+
+// UI element names that commonly appear in frontend code paths / component names
+const UI_REGION_TERMS = [
+  "sidebar", "header", "footer", "modal", "dialog", "panel", "navbar", "nav",
+  "button", "card", "form", "input", "table", "list", "menu", "toolbar", "tab",
+  "badge", "chip", "dropdown", "select", "textarea", "editor", "terminal",
+  "explorer", "taskbar", "topbar", "statusbar", "breadcrumb", "pagination",
+  "accordion", "drawer", "sheet", "tooltip", "popover", "toast", "notification",
+  "grid", "flex", "container", "wrapper", "layout", "content", "body", "row",
+  "column", "cell", "item", "entry", "feed", "log", "output", "preview", "detail",
+  "overlay", "backdrop", "mask", "banner", "alert", "spinner", "loader",
+  "avatar", "icon", "label", "tag", "caption", "heading", "title", "subtitle",
+  "description", "placeholder", "empty", "skeleton", "progress", "bar",
+];
+
+function extractTerms(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[\W_]+/)
+    .filter((t) => t.length > 2 && !STOP_WORDS.has(t));
+}
+
+/**
+ * Extract file-selection keywords from a vision model's analysis output.
+ * Returns a deduplicated list of lowercase terms suitable for path matching.
+ */
+export function extractVisualKeywords(analysisText: string): string[] {
+  const keywords = new Set<string>();
+  const lower = analysisText.toLowerCase();
+
+  // 1. CamelCase words — likely React component names — convert to kebab-case
+  //    e.g. "TaskPanel" → ["task-panel", "task", "panel"]
+  //    e.g. "FileExplorer" → ["file-explorer", "file", "explorer"]
+  const camelWords = analysisText.match(/\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b/g) ?? [];
+  for (const word of camelWords) {
+    const kebab = word
+      .replace(/([A-Z])/g, (m, c, i) => (i > 0 ? "-" : "") + c.toLowerCase())
+      .replace(/^-/, "");
+    keywords.add(kebab);
+    kebab.split("-").forEach((part) => { if (part.length > 3 && !STOP_WORDS.has(part)) keywords.add(part); });
+  }
+
+  // 2. Known UI region terms mentioned anywhere in the analysis text
+  for (const term of UI_REGION_TERMS) {
+    if (lower.includes(term)) keywords.add(term);
+  }
+
+  // 3. Quoted file paths or component filenames  (e.g. `task-panel.tsx`, "styles.css")
+  const quotedPaths = analysisText.match(/[`'"]([\w][\w\-./]+\.[a-z]{2,5})[`'"]/g) ?? [];
+  for (const quoted of quotedPaths) {
+    const inner  = quoted.slice(1, -1);
+    const base   = inner.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+    const kebab  = base.replace(/_/g, "-").toLowerCase();
+    if (kebab.length > 2 && !STOP_WORDS.has(kebab)) keywords.add(kebab);
+  }
+
+  return [...keywords].filter((k) => k.length > 2 && !STOP_WORDS.has(k));
+}
+
+// ─── Visual-aware file selector ───────────────────────────────────────────────
+//
+// Augments the existing visual-debug file scorer with keywords extracted from
+// the vision model's analysis output.  Each returned file includes a `reasons`
+// array so the caller can surface a transparent "why this file" explanation to
+// the agent — turning file selection from a silent heuristic into something the
+// agent (and the user) can actually reason about.
+
+export interface ScoredFile {
+  file:    FileMetadata;
+  reasons: string[];   // e.g. ["visual: task-panel", "prompt: panel", "style file"]
+  score:   number;
+}
+
+/**
+ * Select files relevant to a visual task, scored by BOTH the user prompt AND
+ * the vision model's analysis output.  Returns up to `maxFiles` results with
+ * per-file reasoning.
+ *
+ * Use this instead of selectVisualDebugFiles() for fix/improve/analyze intents.
+ */
+export function selectVisualAwareFiles(
+  index:          ProjectIndex,
+  userPrompt:     string,
+  visualAnalysis: string,
+  maxFiles:       number = 10
+): ScoredFile[] {
+  const promptTerms = extractTerms(userPrompt);
+  const visualTerms = extractVisualKeywords(visualAnalysis);
+
+  const results: ScoredFile[] = [];
+
+  for (const file of index.files) {
+    const filePath = file.path.toLowerCase().replace(/\\/g, "/");
+    let score = 0;
+    const reasons: string[] = [];
+
+    // File-type signals (same weights as selectVisualDebugFiles)
+    if (VISUAL_STYLE_EXTS.has(file.ext)) {
+      score += 5; reasons.push("style file");
+    } else if (filePath.includes(".module.")) {
+      score += 4; reasons.push("CSS module");
+    } else if (VISUAL_COMPONENT_EXTS.has(file.ext)) {
+      score += 2; reasons.push("component file");
+    }
+
+    // Path-pattern signals
+    for (const signal of VISUAL_PATH_SIGNALS) {
+      if (filePath.includes(signal)) { score += 2; break; }
+    }
+
+    // Prompt keyword match (weight 3 — original user intent)
+    for (const term of promptTerms) {
+      if (filePath.includes(term)) {
+        score += 3;
+        reasons.push(`prompt: "${term}"`);
+      }
+    }
+
+    // Visual analysis keyword match (weight 4 — higher than prompt, because
+    // these terms come from what the screenshot actually showed)
+    for (const term of visualTerms) {
+      if (filePath.includes(term)) {
+        score += 4;
+        if (!reasons.some((r) => r.includes(`"${term}"`))) {
+          reasons.push(`visual: "${term}"`);
+        }
+      }
+    }
+
+    // Recency (visually-broken code is often recently touched)
+    const ageHours = (Date.now() - file.mtimeMs) / 3_600_000;
+    if      (ageHours < 1)  score += 3;
+    else if (ageHours < 8)  score += 2;
+    else if (ageHours < 48) score += 1;
+
+    // Shallow files (global styles, main layout files) preferred
+    if (file.depth <= 2) score += 1;
+
+    if (score >= MIN_VISUAL_SCORE) {
+      results.push({ file, reasons, score });
+    }
+  }
+
+  return results
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxFiles);
+}
+
 // ─── Summary builder ──────────────────────────────────────────────────────────
 
 export function buildProjectSummary(

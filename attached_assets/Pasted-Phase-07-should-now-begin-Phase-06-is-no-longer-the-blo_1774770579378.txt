@@ -1,0 +1,198 @@
+Phase 07 should now begin.
+
+Phase 06 is no longer the blocker.
+
+VenomGPT now has a verified core screenshot-analysis/report workflow:
+
+* screenshot submission works
+* visual task detection works
+* visual analysis runs successfully
+* grounded report generation works
+* output can be written to disk and verified
+
+So this next pass is not about proving basic multimodal intake anymore.
+
+This is a focused **Phase 07 — Visual-to-Action Reliability Pass**.
+
+## Current state
+
+VenomGPT already has:
+
+* a working local execution-oriented coding assistant baseline
+* validated file and command execution
+* multi-step task handling
+* provider-aware routing improvements
+* operator-facing task lifecycle stability
+* verified screenshot-analysis/report capability
+
+The remaining gap is this:
+
+VenomGPT can now understand a screenshot well enough to describe/report issues, but it is not yet reliably turning that visual understanding into actionable coding work.
+
+That is the next problem to solve.
+
+## Job
+
+Implement a bounded Phase 07 pass that moves VenomGPT from:
+
+**screenshot understanding**
+to
+**screenshot-informed execution**
+
+Do not stop at analysis.
+
+Make the code changes.
+
+## What this phase is trying to achieve
+
+This phase should make VenomGPT materially better at taking a screenshot-driven task and using that visual context to guide actual coding work.
+
+The goal is not just:
+
+* “describe the screenshot”
+* “write a report”
+* “summarize visible issues”
+
+The goal is:
+
+Use screenshot understanding to improve:
+
+* code inspection targeting
+* file/component selection
+* debugging direction
+* suggested edits
+* execution planning
+* grounded actionability
+
+In other words:
+
+A screenshot should become useful execution input, not just reporting input.
+
+## Required outcomes
+
+1. VenomGPT should be able to use screenshot-derived understanding to identify likely relevant code areas, files, or component targets more concretely.
+
+2. The system should improve the bridge between visual findings and actionable next steps, such as:
+
+   * inspect likely files/components
+   * identify probable UI ownership areas
+   * suggest concrete edit targets
+   * prioritize likely debugging paths
+
+3. The agent loop should use visual context as part of execution reasoning, not just as a detached side-report.
+
+4. The system should remain honest about uncertainty:
+
+   * what is visually observed
+   * what is inferred
+   * what still requires repo inspection
+   * what still requires execution verification
+
+5. Preserve the already-working screenshot-analysis/report path.
+
+6. Preserve text-only behavior and existing execution reliability.
+
+## What to inspect and fix
+
+Audit and improve the real code paths involved in turning visual analysis into action, including where relevant:
+
+* visual analysis output structure
+* task classification / intent handling
+* agent-loop prompt construction
+* task planning logic
+* how visual findings are injected into execution context
+* file/component targeting heuristics
+* repo inspection flow after visual analysis
+* execution summaries and completion reporting
+* task types where screenshot context should influence action rather than only narration
+
+## Implementation requirements
+
+1. Keep this phase architecture-consistent with the current codebase.
+
+2. Do not turn this into a broad new multimodal redesign.
+
+3. Do not add image generation.
+
+4. Do not add audio/video.
+
+5. Do not fake precise component detection if the screenshot does not justify it.
+
+6. Improve actionability in a bounded, evidence-aware way.
+
+7. If visual analysis outputs need better structure to support action, improve that structure.
+
+8. If the agent prompt/execution loop needs a better bridge between visual findings and repo work, implement that bridge.
+
+9. Preserve diagnostics so we can understand:
+
+   * what visual findings were produced
+   * how they influenced execution
+   * what files/components were chosen and why
+
+10. If some screenshot-driven actions remain too uncertain, keep the system honest instead of pretending confidence.
+
+## Verification requirements
+
+You must verify with real evidence, not claims.
+
+At minimum, verify all of the following locally:
+
+1. A text-only task still works.
+
+2. A screenshot-analysis/report task still works.
+
+3. A screenshot-driven task that should produce actionable coding direction now does more than just report visible issues.
+
+4. At least one screenshot-driven task should influence:
+
+   * file inspection
+   * component targeting
+   * or edit planning
+     in a grounded way.
+
+5. Show that the system distinguishes between:
+
+   * visible evidence
+   * inferred likely target areas
+   * verified code-level results
+
+6. Demonstrate that the execution output remains honest and does not overclaim certainty from the screenshot alone.
+
+Show concrete proof through:
+
+* code changes
+* logs
+* example task flows
+* local results
+* files written or inspected
+* exact commands run
+
+## Explicitly not this phase
+
+Do not turn this into:
+
+* broad multimodal feature expansion
+* image generation work
+* audio/video capability work
+* a full UI redesign
+* generic brainstorming about future vision possibilities
+* analysis-only output
+* fake “AI sees the whole app perfectly” behavior
+
+## Final response format
+
+1. What I changed
+2. How screenshot understanding now influences action
+3. Files changed and why
+4. What task types improved
+5. What was verified locally
+6. What remains limited or uncertain
+7. Exact commands run
+8. Whether Phase 07 meaningfully improved screenshot-to-action behavior
+
+Important instruction
+
+Do not stop at analysis.
+Do not leave this as a plan.
+Implement the phase and verify it with real evidence.
