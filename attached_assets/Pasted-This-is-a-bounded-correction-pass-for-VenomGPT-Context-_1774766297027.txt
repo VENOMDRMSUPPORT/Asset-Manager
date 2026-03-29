@@ -1,0 +1,194 @@
+This is a bounded correction pass for VenomGPT.
+
+## Context
+VenomGPT now has an implemented screenshot/image task path, and a real visual route was successfully invoked in testing.
+
+However, the latest real task evidence shows that the current screenshot-to-file execution path is still not good enough for production-like use.
+
+The tested task was:
+"write some information into a file .. about the error which appear in the attached screen"
+
+The logs show:
+- visual task detection worked
+- visual analysis started correctly
+- visual analysis completed using model `glm-4.6v` on lane `paas`
+- but the visual analysis phase took far too long
+- the agent then produced a normalization warning with multiple JSON actions
+- it attempted to read a file that did not exist
+- only later did it write the file and verify it
+- the final written report contained claims that were not sufficiently grounded in the visible evidence and were not fully aligned with the actual runtime logs
+
+This is not a new phase.
+This is a correction pass.
+
+## Current confirmed state
+These areas are already working and must be preserved:
+
+- Visual task detection works
+- A true vision-capable route can be invoked
+- The system can complete a screenshot-driven task end-to-end
+- File writing still works
+- Command execution still works
+- Core task lifecycle still works
+
+## Problem to solve now
+Fix the screenshot-task execution path so that it becomes:
+
+1. materially faster
+2. more grounded and trustworthy
+3. less prone to agent drift after visual analysis
+4. better aligned with the user’s real intent for screenshot-to-file tasks
+
+The main problem is not “add more multimodal features.”
+The real problem is:
+the current screenshot task flow is too slow, too indirect, and too willing to invent or overstate conclusions that are not solidly grounded in what is actually visible.
+
+## What this pass is NOT
+This pass is NOT:
+- a new feature phase
+- a redesign of the visual pipeline
+- a provider expansion pass
+- an MCP expansion pass
+- an image/audio/video/translation phase
+- a broad UI redesign
+- a general prompt tuning experiment
+- a vague “improve quality” pass
+
+Do not broaden scope.
+Do not start a new architecture project.
+Do not fake improvement using prompt-only cosmetic changes if the execution path still drifts.
+
+## Required outcomes
+Implement the following corrections:
+
+1. Screenshot-driven tasks must execute materially faster than the currently observed flow.
+2. Screenshot analysis output must be grounded in visible evidence.
+3. The agent must clearly separate:
+   - directly observed in screenshot
+   - likely inference
+   - unknown / not visible
+4. The agent must not invent root causes, entitlement failures, fallback-chain failures, or CSS causes unless those are actually visible in the screenshot or confirmed by available runtime evidence in the task flow.
+5. For screenshot-to-file tasks, the post-vision flow must be simplified:
+   - analyze screenshot
+   - produce grounded findings
+   - write target file
+   - optionally verify written file
+   and avoid unnecessary detours
+6. Eliminate or materially reduce the multi-action normalization problem in this task path.
+7. Preserve existing working non-visual task behavior.
+
+## Implementation requirements
+Make targeted corrections to the screenshot-task flow.
+
+### A. Speed correction
+- Reduce screenshot-task latency materially.
+- Audit why the current visual task path takes too long.
+- Minimize unnecessary waiting, redundant post-processing, and excess loop steps after visual analysis.
+- Prefer a faster route and execution pattern for screenshot-to-file tasks where possible.
+- Do not add heavy probing or extra tool calls on the critical path.
+
+### B. Grounded reporting correction
+- Add a grounded reporting structure for screenshot analysis.
+- The analysis output for screenshot tasks must explicitly distinguish:
+  - Observed
+  - Likely inference
+  - Not visible / cannot confirm
+- Prevent the model from presenting invisible or unverified system-internal claims as facts.
+- Especially prevent fabricated claims about:
+  - API entitlement failure
+  - full fallback chain failure
+  - exact CSS root cause
+  - unseen logs or hidden terminal content
+unless those are truly visible or directly confirmed in the execution context.
+
+### C. Intent-following correction
+For tasks like:
+"write some information into a file about the error in the attached screen"
+
+the system should understand that the user wants:
+- a concise, grounded description of the visible error
+- written into a file
+not an overreaching forensic audit full of unverified internal claims.
+
+### D. Agent-flow correction
+- Reduce unnecessary action drift after screenshot analysis.
+- Prevent the agent from trying unrelated reads before writing the requested file when the user’s intent is already clear.
+- If the task is simply to create/write a report file from screenshot findings, the agent should move directly to file creation once it has enough grounded evidence.
+
+### E. Normalization / action-discipline correction
+- Investigate and correct the multi-action emission problem in this screenshot path.
+- The model should not return multiple conflicting JSON actions for a single next step when one action is clearly appropriate.
+- Tighten the task loop so screenshot-to-file tasks behave deterministically.
+
+### F. Keep provider reality honest
+- Continue using the existing real Z.AI-backed visual route for current testing.
+- Use the `ZAI_API_KEY` already available in Replit Secrets.
+- Do not assume unsupported routes failed unless the logs for the tested run actually show that.
+
+## Verification required
+You must verify this with real evidence, and you must run your own browser-based test.
+
+### 1. Build and startup
+- Confirm the project still builds / typechecks
+- Confirm the app still starts correctly
+
+### 2. Browser-based real test
+Using the app in the browser and the `ZAI_API_KEY` from Replit Secrets, run at least one real screenshot-driven task yourself.
+
+Use a task of this exact type:
+- attach a screenshot
+- ask VenomGPT to write a file describing the visible error or UI issue
+
+Do not rely only on code inspection.
+Perform the actual browser workflow end-to-end.
+
+### 3. Speed verification
+- Measure the time for the screenshot analysis portion
+- Measure the total task completion time
+- Compare before vs after
+- Report the numbers clearly
+
+### 4. Grounding verification
+- Show that the new output stays within visible evidence
+- Show that it distinguishes observation vs inference vs unknown
+- Show that it no longer invents invisible internal failure claims
+
+### 5. Flow verification
+- Show that the corrected task path avoids unnecessary read/detour behavior
+- Show the actual executed action sequence
+- Confirm the file gets written directly and correctly
+
+### 6. Regression checks
+Verify that at least:
+- one conversational task still works
+- one file task still works
+- one command task still works
+
+### 7. Evidence requirement
+Your final report must include:
+- actual logs
+- actual timing evidence
+- actual browser test evidence
+- the exact file that was generated during the screenshot task
+- the real action sequence taken by the agent
+
+## Final response format
+Respond with this exact structure:
+
+1. What I changed
+2. Why this correction pass was needed
+3. How screenshot grounding works now
+4. How speed was improved
+5. How the screenshot-to-file flow works now
+6. Files changed
+7. Verification performed
+   - build/typecheck
+   - startup
+   - browser-based screenshot test
+   - before/after timing
+   - grounding validation
+   - flow/action-sequence validation
+   - regression checks
+8. Remaining risks / intentionally deferred items
+
+Do not stop at analysis. Make the code changes, run the browser-based verification yourself, use the configured `ZAI_API_KEY` from Replit Secrets, and report the real results with evidence.

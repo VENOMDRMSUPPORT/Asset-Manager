@@ -117,6 +117,26 @@ Screenshot-driven task intake is fully implemented. Key behavior:
 - **UI**: Composer has a paperclip button (file picker), paste-from-clipboard support, JPEG compression (max 1280px, 85% quality), thumbnail strip, remove-per-image button. Max 5 images, max 4 MB each, max ~25 MB total payload.
 - **`GET /api/agent/capabilities`**: returns the full capability descriptor including `vision.capable`, `vision.primaryModel`, `vision.modelChain`, and `multimodal` flags. Uses `AI_INTEGRATIONS_OPENAI_API_KEY` (not `OPENAI_API_KEY`) for Replit presence check.
 
+### Screenshot-task intent routing (correction pass)
+
+Visual tasks are classified at intake by `classifyVisualIntent(prompt)`:
+
+- **`"report"` intent** — prompts matching "write/create/save… a file/report" or "describe/document/log… the error/issue/screen":
+  - Uses `VISION_REPORT_SYSTEM` + a 3-section grounded prompt (OBSERVED / LIKELY INFERENCE / CANNOT CONFIRM)
+  - `maxTokens: 1200` — fast, focused, no CSS forensics
+  - Agent protocol: **analyze → write file directly → verify → done** (no CSS file inspection step)
+  - Agent is explicitly told: "Do NOT read existing code files. Go directly to write_file."
+
+- **`"fix"` intent** — all other visual tasks (default):
+  - Uses `VISION_FIX_SYSTEM` + the original 6-section CSS defect report
+  - `maxTokens: 3500` — full forensics for CSS debugging
+  - Agent protocol: **plan → inspect CSS files → edit → verify** (unchanged)
+
+Grounding rules enforced by `VISION_REPORT_SYSTEM`:
+- OBSERVED: only verbatim visible facts, no inference
+- LIKELY INFERENCE: every item must be labelled as such
+- CANNOT CONFIRM: explicit list of invisible things — prevents fabricated API/server failures
+
 ## TypeScript & Composite Projects
 
 Every package extends `tsconfig.base.json` which sets `composite: true`.
