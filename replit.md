@@ -97,11 +97,25 @@ artifacts-monorepo/
 ## AI Provider Resolution
 
 The model adapter checks providers in priority order:
-1. **Replit OpenAI Integration** — uses `AI_INTEGRATIONS_OPENAI_BASE_URL` + `AI_INTEGRATIONS_OPENAI_API_KEY`. Model: `gpt-5.2`
-2. **ZAI (z.ai)** — uses `ZAI_API_KEY` + `ZAI_BASE_URL`. Model: `ZAI_MODEL` env var or `z1-32b`
+1. **Z.AI** — uses `ZAI_API_KEY`. Primary provider. Two lanes:
+   - **PAAS lane** (`https://api.z.ai/api/paas/v4/`) — vision models (glm-4.6v, glm-4.6v-flash) + fast chat (glm-4.7-flash, glm-4.5-flash)
+   - **Anthropic-compat lane** (`https://api.z.ai/api/anthropic/v1/messages`) — agentic/coding models (glm-5.1, glm-5, glm-5-code, glm-5-turbo, glm-4.7). Uses `x-api-key` header.
+2. **Replit OpenAI Integration** — uses `AI_INTEGRATIONS_OPENAI_API_KEY` + `AI_INTEGRATIONS_OPENAI_BASE_URL`. Fallback when no ZAI key. Text-only; no vision.
 3. **Error** — emits a structured `ModelError` with category `missing_api_key` if neither is set
 
 Model errors are categorized: `missing_api_key | invalid_api_key | model_not_found | base_url_error | network_error | rate_limit | context_length | unexpected_response | unknown`
+
+## Phase 06 — Visual Analysis Pipeline
+
+Screenshot-driven task intake is fully implemented. Key behavior:
+
+- **Auto-detection**: `classifyTask(images)` immediately marks a task as visual if images are attached. No extra latency.
+- **Fast routing** (config-driven, no runtime probing): vision tasks → `glm-4.6v` (primary) → `glm-4.6v-flash` (fallback) via PAAS lane.
+- **Analysis**: `analyzeVisualContext()` sends images to the vision model with a structured 6-section defect report prompt (3500 maxTokens). The output is injected into the agent's prompt as `VISUAL ANALYSIS` + a 4-step `VISUAL TASK PROTOCOL` with a scored file list for CSS/component targeting.
+- **Honest failure**: if the provider has no vision (`isVisionCapable()` returns false), or the vision call fails for any reason (entitlement error 1113, rate limit, auth), the task is **stopped immediately** with a clear error. There is **no silent text-only fallback** for visual tasks.
+- **`visionStatus` metadata**: `"success"` | `"degraded"` (vision call failed) | `"unavailable"` (provider has no vision). Persisted on the task; shown as a colored badge in the task history UI.
+- **UI**: Composer has a paperclip button (file picker), paste-from-clipboard support, JPEG compression (max 1280px, 85% quality), thumbnail strip, remove-per-image button. Max 5 images, max 4 MB each, max ~25 MB total payload.
+- **`GET /api/agent/capabilities`**: returns the full capability descriptor including `vision.capable`, `vision.primaryModel`, `vision.modelChain`, and `multimodal` flags. Uses `AI_INTEGRATIONS_OPENAI_API_KEY` (not `OPENAI_API_KEY`) for Replit presence check.
 
 ## TypeScript & Composite Projects
 

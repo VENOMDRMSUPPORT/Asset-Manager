@@ -1,0 +1,210 @@
+This is a bounded full phase implementation pass for VenomGPT.
+
+## Context
+VenomGPT already has a working local execution-oriented coding assistant foundation with successful local validation for:
+- file create/modify tasks
+- multi-step task handling
+- command execution
+- routing correctness
+- improved provider diagnostics
+- stable operator-facing task lifecycle behavior
+
+The active current phase is now:
+Visual Analysis + Rich Multimodal Task Intake.
+
+This pass must implement real screenshot/image-driven task handling on top of the working execution-oriented foundation.
+
+Important strategic constraint:
+VenomGPT must remain provider-agnostic at the architecture level.
+However, the current real provider available in this phase is Z.AI.
+So implement the visual-analysis pipeline in a provider-agnostic way, but use Z.AI vision-capable models as the current concrete execution backend.
+
+## Current confirmed state
+These areas are already confirmed working and must not regress:
+
+- Local UI loads correctly
+- Workspace selection works
+- Connected state works
+- Task submission works
+- Task history works with per-task duration display and in-session reopening
+- File creation tasks work
+- File modification tasks work
+- Multi-file create/modify tasks work in local validation
+- Conversational prompts complete cleanly without parse-loop failure
+- Command task execution has succeeded locally
+- Automatic model selection and fallback behavior already exist in the current routing foundation
+- Provider diagnostics are visible in backend logs
+- Task lifecycle UI state unlocks correctly after completion
+- Local bring-up on Ubuntu works
+
+## Problem to solve now
+VenomGPT does not yet have a mature, fast, trustworthy visual-analysis path for screenshot/image-driven coding tasks.
+
+The main goal of this pass is:
+implement high-speed screenshot understanding and frontend/UI issue analysis with automatic background route selection, using a true vision-capable path when available, without exposing routing complexity to the user.
+
+This phase must prioritize:
+- speed
+- routing correctness
+- honest capability detection
+- strong frontend/UI screenshot analysis quality
+- zero regression to the already working text/file/command flows
+
+## What this pass is NOT
+This pass is NOT:
+- a broad redesign of the app
+- a generic “improve everything” pass
+- an image generation phase
+- an audio feature phase
+- a video feature phase
+- a translation feature phase
+- a broad MCP ecosystem expansion pass
+- a provider expansion pass
+- a persistence/history overhaul
+- a performance-only refactor unrelated to screenshot task speed
+- a fake multimodal demo layer
+
+Do not broaden scope beyond screenshot/image-driven coding tasks and frontend/UI issue analysis.
+
+Do not hard-depend the architecture on Z.AI-specific MCP servers.
+
+Do not make MCP the main foundation of visual analysis.
+
+## Required outcomes
+Implement Phase 06 with the following outcomes:
+
+1. VenomGPT can accept screenshot/image-driven tasks in the UI and backend task flow.
+2. The system automatically detects when a task needs visual analysis.
+3. The system performs fast background route selection without making the user think about provider/model details.
+4. The system uses a true vision-capable route when available.
+5. The system is optimized for fast first-response routing for screenshot tasks.
+6. The system can analyze frontend/UI screenshots with strong attention to:
+   - layout issues
+   - spacing/alignment problems
+   - visual hierarchy problems
+   - broken responsive behavior visible in screenshots
+   - misleading or inconsistent UI states
+   - component-level visual defects
+7. The architecture remains provider-agnostic, so future providers can be added without rewriting the multimodal task pipeline.
+8. If no true vision-capable route is available, the system fails honestly and clearly.
+9. Existing text/file/command task behavior must not regress.
+
+## Implementation requirements
+Implement this in a provider-agnostic architecture with a current Z.AI-backed execution path.
+
+Required design rules:
+
+- Create a proper visual task pipeline inside VenomGPT rather than scattering image handling across ad hoc prompt logic.
+- Separate:
+  - task intake classification
+  - capability detection
+  - route selection
+  - visual execution
+  - result normalization
+  - honest failure handling
+- Keep the user experience simple:
+  the user submits a screenshot/image task and the system handles routing automatically in the background.
+
+### Routing and speed requirements
+- Speed is critical for screenshot-task routing.
+- Auto model selection must be fast and lightweight.
+- Do not perform heavy runtime probing for every task.
+- Prefer a cached or config-driven capability registry / route policy.
+- Build a route selection mechanism that can quickly determine whether a true visual path is available.
+
+### Current Z.AI-backed implementation requirement
+Use Z.AI as the current concrete backend, but do not architect the system as “Z.AI-only.”
+Use real vision-capable Z.AI models for screenshot/image analysis.
+Prefer a fast vision-capable model as the primary route for speed-sensitive screenshot tasks, and allow a stronger fallback route when needed for harder visual analysis.
+
+Do not assume all Z.AI models support images.
+Do not send screenshot tasks into non-vision text models and pretend multimodal support exists.
+
+### MCP policy
+- Z.AI MCP servers may be used only as optional bounded enrichment if they materially improve the exact screenshot-analysis workflow.
+- MCP must not be the main or only architecture path.
+- The core screenshot-analysis flow must still make sense if a future provider is added without Z.AI MCP support.
+- Do not tightly couple core task routing to provider-specific MCP surfaces.
+
+### UI / lifecycle requirements
+- Add only the minimum UI needed for image/screenshot task intake and result display.
+- Preserve the current operator-facing lifecycle clarity.
+- Ensure screenshot tasks have clear task state, logs, and output visibility.
+- Do not redesign the whole interface.
+
+### Analysis quality requirements
+The screenshot-analysis output must be useful for real coding/debugging work, not generic image captioning.
+Focus especially on frontend/UI issue detection and precise design observations.
+
+The assistant should be able to return findings such as:
+- what looks visually wrong
+- where the likely UI issue is
+- what component or region appears affected
+- whether the problem looks like CSS/layout/responsive/state/rendering behavior
+- what the likely implementation direction is
+
+## Verification required
+You must verify this with real evidence.
+
+1. Build / typecheck
+- Run the relevant install/build/typecheck commands
+- Confirm the project still builds cleanly
+
+2. Local startup
+- Confirm the app still starts correctly in the local Ubuntu workflow
+- Confirm the core UI still loads and connects
+
+3. Regression checks
+Run and verify all of the following still work:
+- one conversational task
+- one file task
+- one command task
+
+4. Fast routing verification
+- Demonstrate that screenshot/image task routing happens automatically in the background
+- Show what route-selection logic was used
+- Show evidence that route selection is fast and does not rely on heavy probing on every request
+
+5. Positive screenshot-task verification
+- Run at least one real screenshot/image-driven frontend/UI analysis task
+- Show which vision-capable route was selected
+- Show the actual result
+- Show that the result is useful for identifying UI/design issues
+
+6. Honest unsupported-path verification
+- Trigger a case where screenshot/image analysis is unavailable or intentionally unsupported
+- Verify the system fails honestly
+- Show the exact user-visible and log-visible behavior
+
+7. Lifecycle verification
+- Confirm screenshot tasks behave correctly across:
+  - submission
+  - execution
+  - completion/failure
+  - logs/output visibility
+
+8. Repo-truth verification
+- Ensure the final report matches the actual code changes and actual observed behavior
+- Do not rely on summary claims without evidence
+
+## Final response format
+Respond with this exact structure:
+
+1. What I changed
+2. Why this pass was needed
+3. How screenshot task routing works now
+4. How the fast auto model selection works now
+5. How honest failure works now
+6. Files changed
+7. Verification performed
+   - build/typecheck
+   - startup
+   - regression checks
+   - fast routing test
+   - positive screenshot task test
+   - unsupported-path honesty test
+8. Remaining risks / blockers / intentionally deferred items
+
+Do not stop at analysis. Make the code changes, run the verification, and report the real results.
+
+If a true visual route is unavailable for a given task, do not fake multimodal support. Fail honestly, report it clearly, and preserve the integrity of the system.

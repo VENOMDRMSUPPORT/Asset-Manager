@@ -509,8 +509,10 @@ export function TaskPanel() {
                                 task.visionStatus === "success"
                                   ? "Screenshot analysed by vision model"
                                   : task.visionStatus === "degraded"
-                                    ? "Screenshots attached — vision model unavailable, text-only analysis"
-                                    : "Screenshots attached"
+                                    ? "Vision analysis failed — task stopped (no silent text-only fallback)"
+                                    : task.visionStatus === "unavailable"
+                                      ? "Vision not available on current provider — task stopped"
+                                      : "Screenshots attached"
                               }
                             >
                               <ImageIcon className="w-2.5 h-2.5" />

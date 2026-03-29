@@ -160,7 +160,7 @@ router.delete("/agent/tasks/:taskId", (req, res) => {
 
 router.get("/agent/capabilities", (_req, res) => {
   const hasZai    = !!process.env["ZAI_API_KEY"];
-  const hasReplit = !!process.env["OPENAI_API_KEY"];
+  const hasReplit = !!process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
   const provider  = hasZai ? "zai" : hasReplit ? "replit" : "none";
 
   const model         = getModelProvider();
