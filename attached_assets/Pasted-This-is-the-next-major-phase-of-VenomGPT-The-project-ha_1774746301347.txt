@@ -1,0 +1,237 @@
+This is the next major phase of VenomGPT.
+
+The project has already completed a strong execution-quality phase:
+- file and command tasks work
+- repair/verification behavior is materially stronger
+- task lifecycle and history are usable
+- Z.AI multi-lane routing exists
+- VenomGPT now behaves much more like a real execution-oriented local coding agent
+
+The next priority is not broad feature sprawl.
+The next priority is to give VenomGPT strong, practical visual intelligence for real-world usage, especially screenshot-driven debugging and UI/frontend issue analysis.
+
+## Phase name
+
+Visual Analysis + Rich Multimodal Task Intake
+
+## Strategic goal
+
+Make VenomGPT capable of accepting image-heavy tasks in a professional, execution-oriented way.
+
+The system should become able to:
+- ingest screenshots and images as real task inputs
+- analyze them usefully
+- identify visible UI/frontend problems
+- describe issues the way a human user would notice them
+- connect visual observations to likely implementation causes
+- do this in a provider-aware but not provider-locked way
+
+This is not a “look, we support images” phase.
+This is a practical visual-analysis phase.
+
+## What this phase is NOT
+
+Do NOT turn this into:
+- broad image generation productization
+- audio/video expansion
+- MCP ecosystem sprawl
+- cosmetic UI redesign for its own sake
+- speculative multimodal architecture with no real usage payoff
+
+Do NOT stop at analysis.
+Make the code changes, test them, and report real results.
+
+---
+
+# Part 1 — Real image intake
+
+## Goal
+Allow VenomGPT to accept image inputs in a task-oriented way, especially screenshots.
+
+## Requirements
+- support image attachments as part of a task request
+- preserve normal text-only tasks
+- make image inputs available to the backend in a clean architecture-consistent way
+- support one or more images per task if reasonable
+- keep the task model compatible with future multimodal providers
+
+The system should be able to understand:
+- screenshot-only task
+- text + screenshot task
+- multiple screenshots with instructions
+
+Examples:
+- “What is wrong with this UI screenshot?”
+- “Find layout issues in these screenshots.”
+- “Use this screenshot plus the codebase to fix the frontend issue.”
+
+---
+
+# Part 2 — Visual analysis workflow
+
+## Goal
+Add a useful visual-analysis path rather than just raw image model access.
+
+## Requirements
+Build a practical analysis workflow that can:
+- identify visible layout problems
+- identify obvious frontend/UI defects
+- identify spacing/hierarchy/alignment issues
+- identify clipping/overflow/misalignment problems
+- identify suspicious visual states like disabled-looking controls, broken sections, empty states, modal issues, or inconsistent structure
+- describe findings in a user-centered way
+
+The analysis should not be limited to OCR-style reading.
+It should treat screenshots as product/UI artifacts.
+
+The assistant should be able to produce findings like:
+- content is visually cramped
+- spacing hierarchy is weak
+- the task panel is visually overweight
+- the execution feed dominates too much vertical space
+- this looks broken or incomplete to the user
+- the primary action is unclear
+- the selected state is too subtle
+- the empty state is confusing
+
+---
+
+# Part 3 — Code-aware visual debugging bridge
+
+## Goal
+Connect image understanding to code tasks.
+
+## Requirements
+When an image task is combined with a code workspace, the system should be able to:
+- inspect the screenshot
+- form hypotheses about which UI/component/layout files are likely involved
+- use workspace/project intelligence to narrow likely files
+- then inspect/edit relevant code if asked
+
+This phase does not need to solve every frontend bug automatically.
+But it should create a real bridge between:
+- image observations
+- likely code areas
+- execution-oriented debugging
+
+Example target tasks:
+- “This panel looks broken. Find the likely React component and fix it.”
+- “This spacing is ugly. Identify where the layout probably comes from.”
+- “This page looks visually unbalanced. Analyze the screenshot and then patch the code.”
+
+---
+
+# Part 4 — Provider-agnostic vision capability design
+
+## Goal
+Do not hardcode visual capability to one provider or one MCP path.
+
+## Requirements
+Design the multimodal/vision layer so it can support:
+- Z.AI vision-capable routes where appropriate
+- optional MCP-backed enrichment
+- future alternative providers
+- capability-based routing rather than one brittle hardcoded implementation
+
+The architecture should clearly separate:
+- task intake
+- image asset handling
+- provider capability registry
+- multimodal model/lane selection
+- optional enrichment tools
+- execution/orchestration logic
+
+The system must be honest about what is implemented vs. not yet wired.
+
+---
+
+# Part 5 — MCP-backed enrichment, but only where useful
+
+## Goal
+Use MCP carefully, not as a feature explosion.
+
+## Requirements
+Evaluate and integrate MCP-backed visual/context tools only if they materially improve practical screenshot analysis.
+
+Examples may include:
+- Vision MCP Server
+- Web Search MCP Server
+- Web Reader MCP Server
+- Zread MCP Server
+
+But:
+- do not wire everything just because it exists
+- do not burn quota wastefully
+- do not make the whole system dependent on MCP for basic visual tasks
+- keep fallback behavior sane when MCP tools are unavailable or limited
+
+If MCP is used:
+- usage should be intentional
+- logs/diagnostics should make it clear when MCP was used
+- the system should degrade gracefully without it
+
+---
+
+# Part 6 — UX for multimodal tasks
+
+## Goal
+The user should be able to submit image-based tasks without confusion.
+
+## Requirements
+- make image/task intake understandable in the UI
+- clearly show when a task includes image inputs
+- surface useful visual-analysis summaries in task details
+- preserve history/task replay compatibility as much as practical
+- avoid cluttering the workflow
+
+Do not redesign the whole product.
+Do improve the UX enough that image-based tasks feel first-class.
+
+---
+
+# Part 7 — Guardrails and honesty
+
+## Requirements
+- if the current provider/model cannot support a given image task, fail clearly and honestly
+- do not pretend to have visual understanding if the active route cannot provide it
+- do not hallucinate screenshot-specific detail
+- do not blur the line between “provider supports vision” and “product flow supports this task well”
+- if some visual workflows are only partially wired, say so explicitly
+
+---
+
+# Verification required
+
+You must verify with real local runs and report exact behavior for tasks such as:
+
+1. screenshot-only visual analysis task
+2. screenshot + text explanation task
+3. screenshot-heavy frontend issue analysis
+4. screenshot + codebase debugging task
+5. multiple-image task if implemented
+6. provider fallback or failure case for unsupported visual routes
+7. MCP-assisted case if MCP integration is added
+8. history/task display for multimodal tasks
+
+You must show:
+- what actually worked
+- what is partially working
+- what remains deferred
+
+---
+
+# Final response format
+
+1. What I changed
+2. Why this phase was needed
+3. How multimodal task intake works now
+4. How visual analysis works now
+5. How code-aware screenshot debugging works now
+6. How provider-agnostic vision routing works now
+7. How MCP-backed enrichment works now (if added)
+8. Files changed
+9. Verification performed
+10. Remaining risks / not yet solved
+
+Do not stop at analysis.
+Make the code changes, run the verification, and report the real results.

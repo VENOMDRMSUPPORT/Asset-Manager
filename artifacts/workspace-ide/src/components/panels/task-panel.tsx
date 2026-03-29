@@ -39,6 +39,10 @@ interface TaskShape {
   summary?: string;
   failureDetail?: TaskFailureDetail;
   completion?: TaskCompletion;
+  /** Number of images attached to this task (0 = text-only). */
+  imageCount?: number;
+  /** What happened with visual analysis for this task. */
+  visionStatus?: "success" | "degraded" | "unavailable";
 }
 
 interface BackendEvent {
@@ -492,6 +496,27 @@ export function TaskPanel() {
                         </span>
                         <div className="flex items-center gap-1.5">
                           {/* Inline outcome chips */}
+                          {(task.imageCount ?? 0) > 0 && (
+                            <span
+                              className={`text-[10px] font-mono px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
+                                task.visionStatus === "success"
+                                  ? "text-violet-400/80 bg-violet-400/10"
+                                  : task.visionStatus === "degraded"
+                                    ? "text-amber-400/70 bg-amber-400/8"
+                                    : "text-muted-foreground/50 bg-panel-border/30"
+                              }`}
+                              title={
+                                task.visionStatus === "success"
+                                  ? "Screenshot analysed by vision model"
+                                  : task.visionStatus === "degraded"
+                                    ? "Screenshots attached — vision model unavailable, text-only analysis"
+                                    : "Screenshots attached"
+                              }
+                            >
+                              <ImageIcon className="w-2.5 h-2.5" />
+                              {task.imageCount}
+                            </span>
+                          )}
                           {fileCount > 0 && (
                             <span className="text-[10px] font-mono text-emerald-400/70 bg-emerald-400/8 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                               <FileCheck className="w-2.5 h-2.5" />

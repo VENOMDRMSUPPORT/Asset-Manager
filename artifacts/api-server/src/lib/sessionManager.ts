@@ -48,6 +48,8 @@ export interface TaskFailureDetail {
     | "cancelled";
 }
 
+export type VisionStatus = "success" | "degraded" | "unavailable";
+
 export interface AgentTask {
   id: string;
   prompt: string;
@@ -59,6 +61,10 @@ export interface AgentTask {
   summary?: string;
   completion?: TaskCompletion;
   failureDetail?: TaskFailureDetail;
+  /** Number of images attached to this task (0 = text-only). Persisted. */
+  imageCount?: number;
+  /** What happened with visual analysis for this task. Persisted. */
+  visionStatus?: VisionStatus;
 }
 
 // Serialisable summary used for the task list endpoint and persistence.
@@ -92,6 +98,17 @@ export function createTask(prompt: string): AgentTask {
   };
   tasks.set(task.id, task);
   return task;
+}
+
+/**
+ * Set image/vision metadata on a task immediately after creation.
+ * Called by agentLoop before the async agent loop begins.
+ */
+export function setTaskMeta(taskId: string, meta: { imageCount?: number; visionStatus?: VisionStatus }): void {
+  const task = tasks.get(taskId);
+  if (!task) return;
+  if (meta.imageCount !== undefined) task.imageCount = meta.imageCount;
+  if (meta.visionStatus !== undefined) task.visionStatus = meta.visionStatus;
 }
 
 export function createTaskController(taskId: string): AbortController {

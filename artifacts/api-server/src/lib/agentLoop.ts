@@ -8,6 +8,7 @@ import {
   getTaskSignal,
   isTaskCancelled,
   updateTaskStatus,
+  setTaskMeta,
   addEvent,
   type AgentTask,
   type TaskCompletion,
@@ -15,7 +16,14 @@ import {
 } from "./sessionManager.js";
 import { broadcastAgentEvent, broadcastTaskUpdate, broadcastTerminalOutput } from "./wsServer.js";
 import { getWorkspaceRoot, isWorkspaceSet } from "./safety.js";
-import { getProjectIndex, selectRelevantFiles, buildProjectSummary, invalidateProjectIndex } from "./projectIndex.js";
+import {
+  getProjectIndex,
+  selectRelevantFiles,
+  selectVisualDebugFiles,
+  buildProjectSummary,
+  invalidateProjectIndex,
+  type ProjectIndex,
+} from "./projectIndex.js";
 import { logger } from "./logger.js";
 
 // ─── Event helpers ────────────────────────────────────────────────────────────
@@ -488,6 +496,11 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
   const taskId   = task.id;
   createTaskController(taskId);
 
+  // Stamp imageCount immediately so the UI can show it even while running
+  if (taskMeta.isVisual) {
+    setTaskMeta(taskId, { imageCount: taskMeta.imageCount });
+  }
+
   broadcastTaskUpdate(task);
 
   (async () => {
@@ -565,6 +578,7 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
 
       let workspaceSnapshot = "";
       let projectIntelligence = "";
+      let projectIndex: ProjectIndex | null = null;   // kept for visual debug file selection
 
       try {
         // Raw tree (root level only for large projects — kept for structure overview)
@@ -573,6 +587,7 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
 
         // Project index with relevance scoring
         const index = await getProjectIndex(wsRoot);
+        projectIndex = index;  // exposed for visual debug file selection below
         const relevantFiles = selectRelevantFiles(index, prompt, 20);
         projectIntelligence = buildProjectSummary(index, relevantFiles);
 
@@ -620,11 +635,13 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
           // Degrade gracefully — the coding task can still run without vision
           visualDegraded = true;
           visualDegradedReason = "Current AI provider does not support vision. Set ZAI_API_KEY to enable screenshot analysis.";
+          setTaskMeta(taskId, { visionStatus: "unavailable" });
           emit(taskId, "status", "Vision not available on current provider — proceeding with text description only");
           logger.warn({ taskId }, "[VenomGPT] Vision capability absent — degrading to text-only");
         } else {
           try {
             visualContext = await analyzeVisualContext(model, images, prompt, taskId);
+            setTaskMeta(taskId, { visionStatus: "success" });
             emit(taskId, "status", "Visual analysis complete — proceeding with code execution…");
           } catch (err) {
             const isModelError = err instanceof ModelError;
@@ -645,6 +662,7 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
               const shortReason = isModelError ? err.message : String(err);
               visualDegraded = true;
               visualDegradedReason = shortReason;
+              setTaskMeta(taskId, { visionStatus: "degraded" });
               const userMsg = `Vision model unavailable (${category}) — proceeding without screenshot analysis`;
               emit(taskId, "status", userMsg);
               logger.warn(
@@ -695,6 +713,45 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
           `Visual analysis could not be performed because the vision model is currently unavailable (${visualDegradedReason}). ` +
           `Proceed with the task using only the text description. ` +
           `If the task requires visual understanding that cannot be inferred from the code, say so clearly and ask the developer to describe what they see in the screenshot.`
+        );
+      }
+
+      // ── Code-aware visual debugging bridge ───────────────────────────────
+      // For all visual tasks (regardless of whether vision analysis ran),
+      // inject the list of UI/CSS/layout files most likely responsible for
+      // the visual issue.  This guides the agent to start in the right place
+      // without forcing it to scan the entire project first.
+      if (taskMeta.isVisual && projectIndex) {
+        const visualDebugFiles = selectVisualDebugFiles(projectIndex, prompt, 10);
+        if (visualDebugFiles.length > 0) {
+          userPromptParts.push(
+            `Visual debugging — likely UI/frontend files (start here):\n` +
+            visualDebugFiles.map((f) => `  - ${f.path}`).join("\n") +
+            `\n\nFor visual/UI issues, start by reading these files before exploring others. ` +
+            `CSS and style files contain layout rules; component files contain structure.`
+          );
+          logger.debug(
+            { taskId, fileCount: visualDebugFiles.length, files: visualDebugFiles.map((f) => f.path) },
+            "[VenomGPT] Visual debug file scan complete"
+          );
+        }
+      }
+
+      // ── Visual debugging guidance (injected only for visual tasks) ────────
+      // This standing instruction guides the agent's reasoning process when
+      // debugging visual/UI issues — regardless of whether vision ran.
+      if (taskMeta.isVisual) {
+        userPromptParts.push(
+          `Visual debugging guidance:
+When debugging visual or UI issues, reason about the following in your [PLANNING] and [INSPECTING] steps:
+1. CSS layout properties that cause common visual bugs: flex/grid misconfiguration, overflow: hidden clipping content, z-index stacking, position: absolute escaping flow, margin collapsing
+2. Component hierarchy — identify which parent component controls the layout of the broken area
+3. Global styles vs. scoped styles — check if a global rule is overriding a component-level rule
+4. Responsive breakpoints — a layout rule that looks correct at one viewport may break at another
+5. Conditional rendering — is the broken element only rendered under certain conditions?
+6. Recent changes — the most recently modified files are listed above; start there if the issue is new
+
+Ground every hypothesis in the actual code you read. Do not guess based on the visual description alone.`
         );
       }
 

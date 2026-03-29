@@ -8,6 +8,7 @@ import {
   deleteTask,
 } from "../lib/sessionManager.js";
 import { broadcastTaskUpdate } from "../lib/wsServer.js";
+import { getFallbackChain } from "../lib/zaiCapabilities.js";
 
 const router: IRouter = Router();
 
@@ -148,6 +149,52 @@ router.delete("/agent/tasks/:taskId", (req, res) => {
   } else {
     res.status(500).json({ error: "delete_failed", message: "Could not delete task" });
   }
+});
+
+// ─── Provider capability surface ─────────────────────────────────────────────
+//
+// Returns a provider-agnostic view of what the current AI configuration
+// supports.  Used by the frontend and operator tooling for honest capability
+// reporting — no guessing, no fake feature flags.
+
+router.get("/agent/capabilities", (_req, res) => {
+  const hasZai     = !!process.env["ZAI_API_KEY"];
+  const hasReplit  = !!process.env["OPENAI_API_KEY"];
+  const provider   = hasZai ? "zai" : hasReplit ? "replit" : "none";
+
+  const agenticChain = hasZai
+    ? getFallbackChain("agentic").map((c) => `${c.modelId} (${c.lane})`)
+    : ["gpt-5.2 (replit-openai)"];
+
+  const visionChain = hasZai
+    ? getFallbackChain("vision").map((c) => `${c.modelId} (${c.lane})`)
+    : [];
+
+  res.json({
+    provider,
+    agentic: {
+      available:    provider !== "none",
+      primaryModel: hasZai ? "glm-5.1" : hasReplit ? "gpt-5.2" : null,
+      fallbackChain: agenticChain,
+    },
+    vision: {
+      // Vision is wired but requires the Z.AI PAAS lane to be entitled.
+      // The account may or may not have purchased the vision model package.
+      capable:       hasZai,
+      models:        visionChain,
+      runtimeStatus: "unknown",   // tested at call time, not at boot
+      note: hasZai
+        ? "Z.AI vision models wired (glm-4.6v, glm-4.6v-flash on PAAS lane). " +
+          "Requires account entitlement for the vision model package."
+        : "Vision not available. Set ZAI_API_KEY to enable screenshot analysis.",
+    },
+    multimodal: {
+      imageIntake:      true,   // UI + backend validated image submission
+      visionAnalysis:   hasZai, // two-phase: vision model → text → coding agent
+      codeAwareBridge:  true,   // visual debug file scan + guidance always injected
+      mcpEnrichment:    false,  // not yet wired (no MCP servers configured)
+    },
+  });
 });
 
 export default router;

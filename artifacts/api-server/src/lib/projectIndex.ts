@@ -314,6 +314,84 @@ export function selectRelevantFiles(
     .map(({ file }) => file);
 }
 
+// ─── Visual debugging file selector ──────────────────────────────────────────
+//
+// Finds files most likely to be relevant for debugging a visual/UI issue.
+// Prioritises CSS, style, and layout files over generic source files, and
+// uses path-pattern signals specific to frontend/UI work.
+
+const VISUAL_STYLE_EXTS = new Set([".css", ".scss", ".less", ".sass"]);
+const VISUAL_COMPONENT_EXTS = new Set([".tsx", ".jsx", ".vue", ".svelte", ".astro", ".html", ".htm"]);
+
+// Path substrings that strongly suggest UI/layout responsibility
+const VISUAL_PATH_SIGNALS = [
+  "layout", "grid", "panel", "style", "styles", "theme", "themes", "global",
+  "component", "components", "ui", "page", "pages", "view", "views",
+  "nav", "navbar", "header", "footer", "sidebar", "modal", "dialog",
+  "card", "button", "form", "input", "table", "list", "menu", "index.css", "app",
+];
+
+function scoreVisualFile(file: FileMetadata, promptTerms: string[]): number {
+  const filePath = file.path.toLowerCase().replace(/\\/g, "/");
+  let score = 0;
+
+  // CSS/style files → strongest signal
+  if (VISUAL_STYLE_EXTS.has(file.ext)) score += 5;
+  // CSS module pattern (e.g. Button.module.css)
+  if (filePath.includes(".module.")) score += 2;
+  // React/component files → good signal
+  else if (VISUAL_COMPONENT_EXTS.has(file.ext)) score += 2;
+
+  // Path pattern signals (cap contribution at 2 to avoid double-counting)
+  let pathBonus = 0;
+  for (const signal of VISUAL_PATH_SIGNALS) {
+    if (filePath.includes(signal)) { pathBonus = 2; break; }
+  }
+  score += pathBonus;
+
+  // Prompt keyword match
+  for (const term of promptTerms) {
+    if (filePath.includes(term)) score += 3;
+  }
+
+  // Recency (visually-broken code is often recently touched)
+  const ageHours = (Date.now() - file.mtimeMs) / 3_600_000;
+  if      (ageHours < 1)  score += 3;
+  else if (ageHours < 8)  score += 2;
+  else if (ageHours < 48) score += 1;
+
+  // Prefer shallow files (global stylesheets live at root; ignore deep internals)
+  if (file.depth <= 2) score += 1;
+
+  return score;
+}
+
+const MIN_VISUAL_SCORE = 3;
+const MAX_VISUAL_FILES = 10;
+
+/**
+ * Select files most relevant to a visual/UI debugging task.
+ * Returns up to `maxFiles` results ordered by visual-debug relevance score.
+ * Prefer selectRelevantFiles() for general tasks; use this for visual ones.
+ */
+export function selectVisualDebugFiles(
+  index:    ProjectIndex,
+  prompt:   string,
+  maxFiles: number = MAX_VISUAL_FILES
+): FileMetadata[] {
+  const terms = prompt
+    .toLowerCase()
+    .split(/[\W_]+/)
+    .filter((t) => t.length > 2 && !STOP_WORDS.has(t));
+
+  return index.files
+    .map((f) => ({ file: f, score: scoreVisualFile(f, terms) }))
+    .filter(({ score }) => score >= MIN_VISUAL_SCORE)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxFiles)
+    .map(({ file }) => file);
+}
+
 // ─── Summary builder ──────────────────────────────────────────────────────────
 
 export function buildProjectSummary(
