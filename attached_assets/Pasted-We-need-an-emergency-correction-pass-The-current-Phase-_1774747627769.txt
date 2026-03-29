@@ -1,0 +1,110 @@
+We need an emergency correction pass.
+
+The current Phase 06 work has drifted into the wrong behavior and must be corrected immediately.
+
+## What went wrong
+
+For image/screenshot tasks, the system currently does this:
+
+1. detects that an image is attached
+2. tries a vision route
+3. if the vision route is unavailable (for example entitlement_error)
+4. it falls back into a generic text/code agent flow
+5. it then starts reading workspace files and producing a text-only audit that ignores the actual screenshot task intent
+
+This is incorrect behavior.
+
+A screenshot task must NOT silently degrade into a generic workspace-reading task unless the user explicitly asked for a non-visual codebase audit.
+
+We also do NOT want provider sprawl or arbitrary provider additions in this correction pass.
+
+## Goal
+
+Fix the multimodal/vision control flow so screenshot tasks behave honestly and predictably.
+
+This is an emergency correction pass, not a broad new feature phase.
+
+## Required behavior
+
+### 1) Strict task-type routing for image tasks
+If a task includes image/screenshot input, the system must classify it as a visual/multimodal task.
+
+That classification must drive the control flow.
+
+### 2) No invalid fallback into generic code audit
+If the selected vision route is unavailable:
+- do NOT fall back into a generic file-inspection/code-audit flow
+- do NOT start reading unrelated workspace files
+- do NOT fabricate “meta analysis” about what the user is testing
+
+Instead:
+- fail clearly and honestly
+- explain that screenshot analysis could not be performed because the visual route was unavailable
+- preserve the task as a failed/unsupported visual task, not a fake text-only task
+
+### 3) No provider expansion in this pass
+Do NOT add new providers or broaden provider routing logic in this correction pass unless absolutely required for fixing the broken visual control flow.
+
+This pass is not about adding more provider surfaces.
+It is about making the current multimodal behavior correct.
+
+### 4) Honest fallback policy
+If a visual task cannot be executed visually:
+- report that clearly
+- do not pretend the image was analyzed
+- do not convert the request into another task type
+- if partial assistance is possible, it must be explicitly framed as partial and non-visual
+
+### 5) Workspace reads must stay relevant
+A screenshot task should not trigger broad workspace inspection unless:
+- the user explicitly asked to connect the screenshot to the codebase
+and
+- the visual analysis step actually succeeded or a clearly defined non-visual fallback mode was explicitly requested
+
+### 6) Keep the good work already done
+Do not regress:
+- execution-quality improvements
+- project intelligence
+- task persistence
+- VenomGPT naming
+- task history
+- stage-aware feed
+- file/command task behavior
+
+## What to inspect
+
+Audit the current multimodal path end-to-end:
+- task intake
+- image attachment handling
+- task classification
+- provider/capability selection
+- fallback policy
+- failure handling
+- UI messaging for unsupported visual routes
+
+Find exactly where the flow incorrectly drops into the normal text/code path.
+
+## Verification required
+
+You must verify locally and report exact results for these cases:
+
+1. screenshot task with a working visual route
+2. screenshot task with unavailable visual route
+3. screenshot + codebase task where visual analysis succeeds first and then code inspection is allowed
+4. screenshot task where visual analysis is unavailable and the system fails honestly without unrelated workspace crawling
+5. normal text-only task still works
+6. file/command tasks still work after the correction
+
+## Final response format
+
+1. What I changed
+2. What the control-flow bug was
+3. How visual task routing works now
+4. How unavailable-vision cases behave now
+5. What I intentionally did NOT change
+6. Files changed
+7. Verification performed
+8. Remaining risks / deferred items
+
+Do not stop at analysis.
+Make the code changes, verify them, and report real results.

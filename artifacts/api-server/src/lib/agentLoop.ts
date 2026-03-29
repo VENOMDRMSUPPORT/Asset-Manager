@@ -618,70 +618,71 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
       }
 
       // ── Multimodal intake (phase 1: visual analysis) ──────────────────────
-      // If the task includes images, attempt visual analysis first.
-      // Success → rich visual context injected into the agent's prompt.
-      // Degraded → task proceeds as text-only with an honest note for the agent.
-      // Hard failure → task fails with a clear explanation.
+      // If the task includes images, visual analysis MUST succeed before the
+      // agent loop starts.  There is no silent text-only fallback for visual
+      // tasks — if vision is unavailable the task is failed honestly so the
+      // developer knows exactly what happened and can resubmit appropriately.
+      //
+      // Success  → rich visual context injected into the agent's prompt.
+      // Failure  → task fails with a clear, specific explanation.  Period.
       let visualContext = "";
-      let visualDegraded = false;       // true when analysis was attempted but unavailable
-      let visualDegradedReason = "";    // user-readable reason for the degradation
 
       if (taskMeta.isVisual) {
         emit(taskId, "status", `Visual task — ${taskMeta.imageCount} image${taskMeta.imageCount > 1 ? "s" : ""} attached`);
         logger.info({ taskId, imageCount: taskMeta.imageCount }, "[VenomGPT] Visual task detected");
 
-        // Provider-level capability check (e.g. Replit integration has no vision model at all)
+        // ── Provider-level vision check ───────────────────────────────────
+        // Some providers (Replit OpenAI integration) have no vision model at
+        // all.  Fail immediately rather than dropping into a text-only loop.
         if (!model.isVisionCapable()) {
-          // Degrade gracefully — the coding task can still run without vision
-          visualDegraded = true;
-          visualDegradedReason = "Current AI provider does not support vision. Set ZAI_API_KEY to enable screenshot analysis.";
           setTaskMeta(taskId, { visionStatus: "unavailable" });
-          emit(taskId, "status", "Vision not available on current provider — proceeding with text description only");
-          logger.warn({ taskId }, "[VenomGPT] Vision capability absent — degrading to text-only");
-        } else {
-          try {
-            visualContext = await analyzeVisualContext(model, images, prompt, taskId);
-            setTaskMeta(taskId, { visionStatus: "success" });
-            emit(taskId, "status", "Visual analysis complete — proceeding with code execution…");
-          } catch (err) {
-            const isModelError = err instanceof ModelError;
-            const category = isModelError ? err.category : "unknown";
+          logger.warn({ taskId }, "[VenomGPT] Visual task blocked — provider has no vision capability");
+          failTask(taskId, task, "Screenshot analysis requires a vision-capable AI provider", {
+            title: "Vision not available on current provider",
+            detail:
+              `This task includes ${taskMeta.imageCount} screenshot${taskMeta.imageCount > 1 ? "s" : ""} ` +
+              `but the current AI provider does not support vision models.\n\n` +
+              `To analyse screenshots, set ZAI_API_KEY to use Z.AI (glm-4.6v / glm-4.6v-flash).\n\n` +
+              `If you need text-based code assistance without the screenshots, resubmit the task without attaching images.`,
+            step: "visual_analysis",
+            category: "model",
+          });
+          return;
+        }
 
-            // ── Graceful degradation categories ──────────────────────────────
-            // Entitlement, balance, and model-not-found errors mean the vision
-            // model is unavailable for this account/tier — they are NOT hard
-            // infrastructure failures.  We degrade to text-only so the developer
-            // still gets a useful coding response rather than a dead task.
-            const DEGRADABLE_CATEGORIES = new Set([
-              "entitlement_error", "rate_limit", "insufficient_balance",
-              "model_not_found", "unknown",
-            ]);
-            const shouldDegrade = DEGRADABLE_CATEGORIES.has(category);
+        // ── Vision model call ─────────────────────────────────────────────
+        try {
+          visualContext = await analyzeVisualContext(model, images, prompt, taskId);
+          setTaskMeta(taskId, { visionStatus: "success" });
+          emit(taskId, "status", "Visual analysis complete — proceeding with code execution…");
+        } catch (err) {
+          const isModelError = err instanceof ModelError;
+          const category = isModelError ? err.category : "unknown";
+          const shortReason = isModelError ? err.message : String(err);
 
-            if (shouldDegrade) {
-              const shortReason = isModelError ? err.message : String(err);
-              visualDegraded = true;
-              visualDegradedReason = shortReason;
-              setTaskMeta(taskId, { visionStatus: "degraded" });
-              const userMsg = `Vision model unavailable (${category}) — proceeding without screenshot analysis`;
-              emit(taskId, "status", userMsg);
-              logger.warn(
-                { taskId, category, reason: shortReason },
-                "[VenomGPT] Visual analysis unavailable — degrading to text-only task"
-              );
-            } else {
-              // Hard errors (invalid key, bad URL, unexpected response) — fail the task explicitly
-              failTask(taskId, task, `Visual analysis failed: ${isModelError ? err.message : String(err)}`, {
-                title: isModelError ? err.message : "Visual analysis failed",
-                detail: isModelError
-                  ? `Category: ${err.category}\nTechnical: ${err.technical}`
-                  : String(err),
-                step: "visual_analysis",
-                category: "model",
-              });
-              return;
-            }
-          }
+          // All vision failures → fail the task honestly.
+          // No category is "safe" to silently degrade into a text-only loop;
+          // entitlement/rate-limit errors are as blocking as auth errors for a
+          // visual task — the screenshot simply cannot be analysed.
+          setTaskMeta(taskId, { visionStatus: "degraded" });
+          logger.warn(
+            { taskId, category, reason: shortReason },
+            "[VenomGPT] Visual analysis failed — failing task honestly"
+          );
+          failTask(taskId, task, "Screenshot analysis could not be completed", {
+            title: "Vision model unavailable — screenshot task cannot proceed",
+            detail:
+              `This task includes ${taskMeta.imageCount} screenshot${taskMeta.imageCount > 1 ? "s" : ""} ` +
+              `but the vision model failed (${category}: ${shortReason}).\n\n` +
+              `Screenshot analysis was not performed. The task has been stopped to avoid producing ` +
+              `a misleading text-only response that ignores the visual content you provided.\n\n` +
+              `To resolve:\n` +
+              `• Ensure your Z.AI account has the vision model package enabled\n` +
+              `• Or resubmit the task without images and describe the visual issue in text`,
+            step: "visual_analysis",
+            category: "model",
+          });
+          return;
         }
       }
 
@@ -705,23 +706,14 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
           `\n\nUse this visual evidence to guide your code changes. ` +
           `Ground your actions in what is VISIBLE above, not assumptions.`
         );
-      } else if (visualDegraded && taskMeta.isVisual) {
-        // Degraded mode — screenshots were attached but vision analysis was unavailable.
-        // Give the agent an honest, actionable note so it can still help the developer.
-        userPromptParts.push(
-          `Note: The developer attached ${taskMeta.imageCount} screenshot${taskMeta.imageCount > 1 ? "s" : ""} to this task. ` +
-          `Visual analysis could not be performed because the vision model is currently unavailable (${visualDegradedReason}). ` +
-          `Proceed with the task using only the text description. ` +
-          `If the task requires visual understanding that cannot be inferred from the code, say so clearly and ask the developer to describe what they see in the screenshot.`
-        );
       }
 
       // ── Code-aware visual debugging bridge ───────────────────────────────
-      // For all visual tasks (regardless of whether vision analysis ran),
-      // inject the list of UI/CSS/layout files most likely responsible for
-      // the visual issue.  This guides the agent to start in the right place
-      // without forcing it to scan the entire project first.
-      if (taskMeta.isVisual && projectIndex) {
+      // Only injected when visual analysis actually succeeded — the agent has
+      // real screenshot observations to connect to the code.  Injecting this
+      // when vision failed would push the agent into an unrelated codebase
+      // audit that ignores the visual task intent.
+      if (visualContext && projectIndex) {
         const visualDebugFiles = selectVisualDebugFiles(projectIndex, prompt, 10);
         if (visualDebugFiles.length > 0) {
           userPromptParts.push(
@@ -737,10 +729,11 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
         }
       }
 
-      // ── Visual debugging guidance (injected only for visual tasks) ────────
-      // This standing instruction guides the agent's reasoning process when
-      // debugging visual/UI issues — regardless of whether vision ran.
-      if (taskMeta.isVisual) {
+      // ── Visual debugging guidance ─────────────────────────────────────────
+      // Only injected when visual analysis succeeded — the agent has concrete
+      // screenshot observations to reason from.  Without visual context this
+      // guidance would just push the agent to do a generic CSS audit.
+      if (visualContext) {
         userPromptParts.push(
           `Visual debugging guidance:
 When debugging visual or UI issues, reason about the following in your [PLANNING] and [INSPECTING] steps:
