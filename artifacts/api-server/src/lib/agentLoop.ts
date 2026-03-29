@@ -27,6 +27,7 @@ import {
   invalidateProjectIndex,
   type ProjectIndex,
 } from "./projectIndex.js";
+import { getSettings } from "./settingsStore.js";
 import { logger } from "./logger.js";
 
 // ─── Event helpers ────────────────────────────────────────────────────────────
@@ -242,8 +243,9 @@ interface ActionResult {
 
 const MAX_CONTENT_CHARS       = 80_000;
 const MAX_CONSECUTIVE_PARSE_FAILURES = 3;
-const DEFAULT_COMMAND_TIMEOUT_S = 120;
 const MAX_COMMAND_TIMEOUT_S     = 300;
+// Default command timeout is read from settings at call time (not a module-level constant)
+// so changes take effect immediately without a server restart.
 
 function pruneMessages(messages: Message[]): Message[] {
   const total = messages.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 500), 0);
@@ -281,7 +283,12 @@ async function executeAction(
     case "think": {
       const thought = String(action["thought"] ?? "");
       logger.debug({ taskId, actionType: "think" }, `Think: ${thought.slice(0, 120)}`);
-      emit(taskId, "thought", thought);
+      // Respect the showThinkEvents operator setting — suppress thought events when off.
+      // The think action still counts as a step and the model still reasons; only the
+      // event emission is suppressed so the output panel stays cleaner.
+      if (getSettings().showThinkEvents) {
+        emit(taskId, "thought", thought);
+      }
       return { success: true, output: "Thought noted." };
     }
 
@@ -332,7 +339,7 @@ async function executeAction(
 
     case "run_command": {
       const command           = String(action["command"] ?? "");
-      const requestedTimeoutS = Number(action["timeout"]) || DEFAULT_COMMAND_TIMEOUT_S;
+      const requestedTimeoutS = Number(action["timeout"]) || getSettings().commandTimeoutSecs;
       const timeoutMs         = Math.min(Math.max(requestedTimeoutS, 5), MAX_COMMAND_TIMEOUT_S) * 1000;
 
       logger.info({ taskId, actionType: "run_command", command, timeoutS: timeoutMs / 1000 }, "Running command");
@@ -680,7 +687,11 @@ async function analyzeVisualContext(
     { role: "user",   content: [{ type: "text", text: promptText }, ...imageParts] },
   ];
 
-  const result = await model.chat(analysisMessages, { maxTokens, taskHint: "vision" });
+  const visionOpts: Parameters<typeof model.chat>[1] = { maxTokens, taskHint: "vision" };
+  const visionModelPin = getSettings().visionModelOverride;
+  if (visionModelPin) visionOpts.model = visionModelPin;
+
+  const result = await model.chat(analysisMessages, visionOpts);
 
   logger.info(
     { taskId, intent, analysisLength: result.content.length, model: result.modelUsed, lane: result.laneUsed, maxTokens },
@@ -1188,7 +1199,7 @@ Do not read files speculatively. Do not read files to "understand the codebase".
       let   lastActionFailed  = false; // did the immediately preceding action fail?
       let   consecutiveRepairs = 0;    // how many consecutive failures in a row?
 
-      const MAX_STEPS               = 25;
+      const MAX_STEPS               = getSettings().maxSteps;
       const MAX_CONSECUTIVE_REPAIRS = 3; // give up the repair loop after this many
       let step = 0;
       let consecutiveParseFailures = 0;
@@ -1215,10 +1226,20 @@ Do not read files speculatively. Do not read files to "understand the codebase".
         // ── Model call ──────────────────────────────────────────────────────
         let responseText = "";
         try {
+          const agentOpts: Parameters<typeof model.chatStream>[2] = {
+            maxTokens: 4096,
+            temperature: 0.1,
+            taskHint: "agentic",
+          };
+          // If the operator has pinned a specific model in Settings, pass it through.
+          // The provider will use it as a hard override rather than auto-routing.
+          const agentModelPin = getSettings().agentModelOverride;
+          if (agentModelPin) agentOpts.model = agentModelPin;
+
           await model.chatStream(
             pruneMessages(messages),
             (chunk) => { responseText += chunk; },
-            { maxTokens: 4096, temperature: 0.1, taskHint: "agentic" }
+            agentOpts
           );
           logger.debug({ taskId, step, responseLength: responseText.length }, "Model response received");
         } catch (err) {

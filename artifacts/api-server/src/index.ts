@@ -6,6 +6,7 @@ import { initWebSocketServer } from "./lib/wsServer.js";
 import { setWorkspaceRoot } from "./lib/safety.js";
 import { logProviderDiagnostic } from "./lib/modelAdapter.js";
 import { initTaskPersistence, loadPersistedHistory } from "./lib/taskPersistence.js";
+import { loadSettings } from "./lib/settingsStore.js";
 
 const rawPort = process.env["PORT"] ?? "3001";
 const port = Number(rawPort);
@@ -18,6 +19,9 @@ if (process.env["WORKSPACE_ROOT"]) {
   setWorkspaceRoot(process.env["WORKSPACE_ROOT"]);
   logger.info({ root: process.env["WORKSPACE_ROOT"] }, "Workspace root initialized from env");
 }
+
+// Load operator settings first so all downstream modules see the correct values
+await loadSettings();
 
 // Register persistence hook before tasks can run, then load saved history
 initTaskPersistence();

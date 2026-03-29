@@ -23,6 +23,7 @@ import path from "path";
 import os from "os";
 import { logger } from "./logger.js";
 import { registerTaskCompletionHook, hydratePersistedTask, type AgentTaskSummary } from "./sessionManager.js";
+import { getSettings } from "./settingsStore.js";
 
 // ─── Data directory resolution ────────────────────────────────────────────────
 
@@ -42,8 +43,8 @@ function resolveDataDir(): string {
 const DATA_DIR = resolveDataDir();
 const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 
-// Maximum number of tasks to keep in the history file
-const MAX_PERSISTED_TASKS = 100;
+// Maximum number of tasks to keep is read from settings at each write,
+// so operators can change it via the Settings page without restarting the server.
 
 interface PersistedHistory {
   version: 1;
@@ -142,6 +143,16 @@ export async function loadPersistedHistory(): Promise<void> {
 }
 
 /**
+ * Clear all persisted task history from disk and reset the in-memory shadow.
+ * Called by the settings route when the user clears history via the UI.
+ */
+export async function clearPersistedHistory(): Promise<void> {
+  _persisted = [];
+  await writeHistory([]);
+  logger.info({ file: HISTORY_FILE }, "Task history cleared");
+}
+
+/**
  * Register the session-manager hook so completed tasks are automatically saved.
  * Must be called before tasks start running.
  */
@@ -155,9 +166,10 @@ export function initTaskPersistence(): void {
       _persisted.unshift(summary);
     }
 
-    // Trim to max
-    if (_persisted.length > MAX_PERSISTED_TASKS) {
-      _persisted = _persisted.slice(0, MAX_PERSISTED_TASKS);
+    // Trim to the operator-configured capacity (read live from settings)
+    const cap = getSettings().historyCapacity;
+    if (_persisted.length > cap) {
+      _persisted = _persisted.slice(0, cap);
     }
 
     // Fire-and-forget write

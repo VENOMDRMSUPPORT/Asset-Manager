@@ -1,11 +1,13 @@
 import { useState, useRef } from 'react';
+import { useLocation } from 'wouter';
 import { useGetWorkspace, useSetWorkspace } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getGetWorkspaceQueryKey, getListFilesQueryKey } from '@workspace/api-client-react';
-import { TerminalSquare, FolderOpen, Edit2, Check, X, Wifi, WifiOff } from 'lucide-react';
+import { TerminalSquare, FolderOpen, Edit2, Check, X, Wifi, WifiOff, Settings2 } from 'lucide-react';
 import { useIdeStore } from '@/store/use-ide-store';
 
 export function TopBar() {
+  const [, navigate] = useLocation();
   const { data: workspace } = useGetWorkspace();
   const [isEditing, setIsEditing] = useState(false);
   const [editPath, setEditPath] = useState('');
@@ -117,6 +119,14 @@ export function TopBar() {
           }
           <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
         </div>
+
+        <button
+          onClick={() => navigate('/settings')}
+          title="Settings"
+          className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 rounded transition-colors"
+        >
+          <Settings2 className="w-4 h-4" />
+        </button>
       </div>
     </header>
   );

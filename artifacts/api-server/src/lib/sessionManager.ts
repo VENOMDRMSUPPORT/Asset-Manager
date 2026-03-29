@@ -175,6 +175,21 @@ export function deleteTask(taskId: string): boolean {
   return true;
 }
 
+/** Returns all task summaries (no events) — used by diagnostics and settings. */
+export function getAllTaskSummaries(): AgentTaskSummary[] {
+  return listTasksSummary();
+}
+
+/** Remove every non-running task from memory. Running tasks are unaffected. */
+export function clearAllTasks(): void {
+  for (const [id, task] of tasks.entries()) {
+    if (task.status !== "running") {
+      tasks.delete(id);
+      taskControllers.delete(id);
+    }
+  }
+}
+
 export function addEvent(
   taskId: string,
   type: AgentEventType,
