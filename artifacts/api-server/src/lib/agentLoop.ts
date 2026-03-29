@@ -417,10 +417,19 @@ function classifyTask(images: string[]): VisualTaskMeta {
 // This two-phase design lets the best vision model handle image understanding
 // while the best coding model handles planning + execution.
 
-const VISION_ANALYSIS_SYSTEM = `You are a precise visual analysis assistant for a software developer.
-Your job is to extract coding-relevant observations from screenshots or images.
-Be specific about what is VISIBLE. Do not guess or hallucinate.
-Separate what is observed from what is inferred.`;
+const VISION_ANALYSIS_SYSTEM = `You are a senior frontend engineer specialised in diagnosing visual defects in web and mobile applications from screenshots.
+
+Your job: examine the screenshot(s) and produce a precise, code-actionable defect report that a developer can use to open the right file and fix the right CSS rule.
+
+Discipline rules:
+• Report only what is VISUALLY PRESENT in the screenshot. Never invent or infer invisible state.
+• Label every finding as OBSERVED (visible fact) or INFERRED (engineering inference drawn from visible evidence).
+• Use frontend/CSS vocabulary precisely: flex, grid, overflow, z-index, position, margin, padding, gap, clip, viewport, breakpoint, transform, align-items, justify-content, min-height, max-width, etc.
+• Be spatially precise: describe WHERE in the viewport each defect appears — top/bottom/left/right, inside/outside which container, which layer.
+• Name visible UI regions and components clearly: navbar, sidebar, card, modal, table row, button, form field, panel, tab bar, tooltip, overlay, scrollable container, etc.
+• When something is cut off, partially obscured, or outside the screenshot boundary, say so explicitly.
+• Do not guess at business logic, server state, or framework internals not visible in the screenshot.
+• When multiple defects are present, list them individually — do not group them into vague summaries.`;
 
 async function analyzeVisualContext(
   model:     ReturnType<typeof getModelProvider>,
@@ -441,24 +450,54 @@ async function analyzeVisualContext(
 
   const promptText = `Developer task: "${userPrompt}"
 
-Analyze ${countLabel} and provide a structured visual inspection report for a developer:
+You are examining ${countLabel}. Produce a structured frontend defect report. Be precise, specific, and code-actionable.
 
 ## 1. VISIBLE STATE
-Describe exactly what is shown — UI components, layout, text content, error messages, code visible on screen, terminal output, or anything else visible.
+List each distinct UI region or component visible. For each: describe its current visual state, layout, text content, and any styling detail relevant to the task. Note where it appears in the viewport.
 
-## 2. VISIBLE DEFECTS
-List every observable problem: layout misalignments, truncated/overlapping content, error states, broken styles, wrong colors, empty states that should have content, incorrect text, etc. Be specific — name the component or area.
+## 2. LAYOUT DEFECT CHECKLIST
+For each category below, state any defect clearly and precisely. If none observed, write "✓ not observed".
 
-## 3. RELEVANT CODE AREAS
-Based on what you see, identify which component types, file patterns, or UI layer is likely responsible. Be specific where you can (e.g. "the navigation sidebar", "the data table pagination", "the error boundary").
+SPACING & ALIGNMENT — Misaligned elements, uneven gaps between siblings, unexpected margin/padding collapse, elements butting against container edges incorrectly?
 
-## 4. TASK RELEVANCE
-Directly relate what you see to the developer's task. What specifically in the screenshot needs to change to satisfy the task?
+OVERFLOW & CLIPPING — Content cut off at a container edge, unwanted scrollbars appearing, content hidden behind a fixed/sticky element, text or images visually cropped?
 
-## 5. AMBIGUITIES / LIMITS
-What cannot be determined from the image alone? What would require reading the actual source code to understand?
+FLEX / GRID LAYOUT — Items failing to distribute correctly, wrong wrap behavior, flex children collapsing to zero, grid cells the wrong size, items not filling available space?
 
-Ground every observation in what is VISIBLY PRESENT. If an area is outside the screenshot, say so.`;
+Z-INDEX & STACKING — Elements overlapping in the wrong order, content hidden under another layer, tooltip/dropdown/modal not above its context, shadow or border clipped by stacking context?
+
+SIZING — Element too wide or too narrow (ignoring its container), too tall or too short, aspect ratio wrong, element not growing/shrinking as expected?
+
+TYPOGRAPHY — Text truncated with or without ellipsis, text overflowing its container, wrong font size or weight relative to surrounding text, baseline misalignment between adjacent text elements?
+
+COLOR & STYLE — Wrong background color, missing border or shadow, element showing default browser styling (no CSS applied), opacity or visibility wrong?
+
+COMPONENT STATE — Wrong state shown: error state when content is expected, loading spinner when data is ready, empty state placeholder still showing, disabled styling on an enabled element?
+
+RESPONSIVE / VIEWPORT — Elements reflowing, collapsing, or overflowing at the current viewport width in a way that looks unintentional?
+
+## 3. CSS ROOT-CAUSE INFERENCE
+For each defect found above, give the most likely CSS cause. Format:
+"[Defect] → [LIKELY|POSSIBLE] CAUSE: [CSS property or pattern]"
+
+Example format:
+"Text cut off at right edge → LIKELY CAUSE: overflow: hidden on parent with no flex-shrink room"
+"Bottom of card invisible → LIKELY CAUSE: parent has overflow: hidden with a fixed height that does not accommodate the card"
+"Items bunched left → LIKELY CAUSE: flex container missing justify-content: space-between; or children have flex-grow: 0"
+"Content hidden under sticky header → POSSIBLE CAUSE: missing z-index on the content layer, or position: sticky header consuming layout space"
+
+Label each LIKELY (high visual confidence) or POSSIBLE (plausible but uncertain without code).
+
+## 4. COMPONENT OWNERSHIP
+For each defect, identify: (a) the visible element where the symptom appears, (b) the parent component most likely responsible for the layout rule causing it, (c) whether the fix is most likely in: inline styles | component-scoped CSS/Tailwind class | shared/global stylesheet | parent layout container.
+
+## 5. TASK RELEVANCE
+Directly connect your findings to the developer's task. Which defects are directly relevant? What visual change is needed to satisfy the task? Which component or CSS rule is the primary target?
+
+## 6. LIMITS
+What cannot be confirmed from this screenshot alone? What requires reading the source code (CSS, component files) to determine? Be specific about what is unknown.
+
+Be direct and actionable. The developer must be able to open the right file and identify the right rule from this report.`;
 
   const analysisMessages: Message[] = [
     { role: "system", content: VISION_ANALYSIS_SYSTEM },
@@ -472,7 +511,7 @@ Ground every observation in what is VISIBLY PRESENT. If an area is outside the s
   ];
 
   const result = await model.chat(analysisMessages, {
-    maxTokens:  2000,
+    maxTokens:  3500,   // 6-section structured report needs more room than a generic description
     taskHint:   "vision",
   });
 
@@ -695,56 +734,55 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
       }
       userPromptParts.push(`File structure:\n${workspaceSnapshot}`);
 
-      // Visual context is injected between workspace context and the task
+      // ── Visual context + code-aware bridge ───────────────────────────────
+      // Only injected when visual analysis actually succeeded.  The bridge
+      // maps visual defect findings → CSS investigation strategy → likely files,
+      // so the agent starts in exactly the right place rather than scanning the
+      // whole project or reading unrelated files.
       if (visualContext) {
-        // Full analysis succeeded — inject rich visual context
+        // 1. Visual analysis findings
         userPromptParts.push(
-          `Visual context (from screenshot analysis):\n` +
-          `The developer attached ${taskMeta.imageCount} screenshot${taskMeta.imageCount > 1 ? "s" : ""}. ` +
-          `The following visual analysis was produced by a vision model before this coding session:\n\n` +
-          visualContext +
-          `\n\nUse this visual evidence to guide your code changes. ` +
-          `Ground your actions in what is VISIBLE above, not assumptions.`
+          `VISUAL ANALYSIS — ${taskMeta.imageCount} screenshot${taskMeta.imageCount > 1 ? "s" : ""} analysed:\n\n` +
+          visualContext
         );
-      }
 
-      // ── Code-aware visual debugging bridge ───────────────────────────────
-      // Only injected when visual analysis actually succeeded — the agent has
-      // real screenshot observations to connect to the code.  Injecting this
-      // when vision failed would push the agent into an unrelated codebase
-      // audit that ignores the visual task intent.
-      if (visualContext && projectIndex) {
-        const visualDebugFiles = selectVisualDebugFiles(projectIndex, prompt, 10);
-        if (visualDebugFiles.length > 0) {
-          userPromptParts.push(
-            `Visual debugging — likely UI/frontend files (start here):\n` +
-            visualDebugFiles.map((f) => `  - ${f.path}`).join("\n") +
-            `\n\nFor visual/UI issues, start by reading these files before exploring others. ` +
-            `CSS and style files contain layout rules; component files contain structure.`
-          );
-          logger.debug(
-            { taskId, fileCount: visualDebugFiles.length, files: visualDebugFiles.map((f) => f.path) },
-            "[VenomGPT] Visual debug file scan complete"
-          );
+        // 2. Code-aware file bridge — scored by CSS/component relevance to prompt
+        let fileBridgeSection = "";
+        if (projectIndex) {
+          const visualDebugFiles = selectVisualDebugFiles(projectIndex, prompt, 10);
+          if (visualDebugFiles.length > 0) {
+            fileBridgeSection =
+              `\nFILES TO INVESTIGATE (scored by visual-debug relevance):\n` +
+              visualDebugFiles.map((f) => `  ${f.path}`).join("\n");
+            logger.debug(
+              { taskId, fileCount: visualDebugFiles.length, files: visualDebugFiles.map((f) => f.path) },
+              "[VenomGPT] Visual debug file scan complete"
+            );
+          }
         }
-      }
 
-      // ── Visual debugging guidance ─────────────────────────────────────────
-      // Only injected when visual analysis succeeded — the agent has concrete
-      // screenshot observations to reason from.  Without visual context this
-      // guidance would just push the agent to do a generic CSS audit.
-      if (visualContext) {
+        // 3. Visual task investigation protocol
         userPromptParts.push(
-          `Visual debugging guidance:
-When debugging visual or UI issues, reason about the following in your [PLANNING] and [INSPECTING] steps:
-1. CSS layout properties that cause common visual bugs: flex/grid misconfiguration, overflow: hidden clipping content, z-index stacking, position: absolute escaping flow, margin collapsing
-2. Component hierarchy — identify which parent component controls the layout of the broken area
-3. Global styles vs. scoped styles — check if a global rule is overriding a component-level rule
-4. Responsive breakpoints — a layout rule that looks correct at one viewport may break at another
-5. Conditional rendering — is the broken element only rendered under certain conditions?
-6. Recent changes — the most recently modified files are listed above; start there if the issue is new
+          `VISUAL TASK PROTOCOL:${fileBridgeSection}
 
-Ground every hypothesis in the actual code you read. Do not guess based on the visual description alone.`
+How to execute a visual fix correctly:
+
+STEP 1 — PLANNING: Read the visual analysis above. Identify the specific defect(s) and the CSS root-cause inference provided. Plan which CSS property/component you need to fix BEFORE reading any code.
+
+STEP 2 — INSPECTING: Read the listed files (or the most relevant subset) to find the exact CSS rule responsible. Do not read files unrelated to the defect. Match: defect type → likely CSS property → the file where that rule lives.
+
+  Defect type → where to look:
+  • Spacing/alignment → padding, margin, gap on the container or its children
+  • Overflow/clipping → overflow: hidden, max-height, height on ancestor containers
+  • Flex/grid → display: flex/grid on the parent, then justify-content, align-items, flex-wrap, grid-template
+  • Z-index/stacking → position: relative/absolute/fixed, z-index, isolation: isolate
+  • Sizing → width, height, min-*, max-*, flex-basis, flex-grow, flex-shrink
+  • Typography → overflow, text-overflow: ellipsis, white-space: nowrap, max-width on text containers
+  • State visibility → conditional class logic, display: none / visibility: hidden, opacity: 0
+
+STEP 3 — EDITING: Fix the CSS rule in the component that OWNS the layout (not a descendant symptom). Write the complete file content.
+
+STEP 4 — VERIFYING: After writing, confirm the change targets the exact visual symptom described in the analysis. Your done action must cite: what was visually broken → which CSS rule you changed → how this resolves the observed defect.`
         );
       }
 

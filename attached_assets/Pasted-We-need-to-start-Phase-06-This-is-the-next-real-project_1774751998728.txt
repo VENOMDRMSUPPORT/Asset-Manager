@@ -1,0 +1,256 @@
+We need to start **Phase 06**.
+
+This is the next real project phase for VenomGPT.
+
+Phase 05 is already complete enough.
+Do not re-open it.
+Do not drift into generic hardening.
+Do not turn this into provider sprawl.
+Do not turn this into MCP expansion for its own sake.
+
+## Context
+
+VenomGPT already has a working local execution-oriented coding assistant baseline.
+
+The following are already materially working and should be preserved:
+
+* local UI / workspace flow
+* task submission
+* task history / in-session reopening
+* file create / modify tasks
+* multi-file tasks
+* command execution
+* Z.AI lane-aware routing
+* automatic fallback behavior
+* operator-facing lifecycle stability
+* honest failure surfacing
+* Ubuntu local validation
+
+The current project phase is now:
+
+**Visual Analysis + Rich Multimodal Task Intake**
+
+This phase is about making VenomGPT genuinely strong on screenshot-driven engineering tasks and image-driven task intake, especially for frontend/UI defect work.
+
+## The real problem to solve
+
+VenomGPT now has the execution-oriented foundation, but it still does **not** yet have a mature, dependable multimodal task path for real screenshot-heavy engineering work.
+
+The next pass must make image/screenshot tasks feel like a serious coding agent capability, not a demo gimmick.
+
+Specifically, we need:
+
+1. accurate screenshot understanding
+2. strong frontend/UI defect interpretation
+3. fast and mostly invisible auto-model selection in the background
+4. provider-aware but **provider-agnostic** multimodal architecture
+5. VenomGPT-owned internal capability for image/screenshot task handling
+6. no fake multimodal claims
+7. no broad image/video/audio productization
+
+## Important product direction
+
+Z.AI is the current primary provider direction.
+
+However:
+
+* most Z.AI models do **not** support image tasks
+* only the appropriate vision-capable paths should be used for image analysis
+* the product must not be architected in a way that traps VenomGPT inside Z.AI-specific assumptions forever
+
+Z.AI may provide useful MCP servers such as:
+
+* Vision MCP Server
+* Web Search MCP Server
+* Web Reader MCP Server
+* Zread MCP Server
+
+But this pass must **not** make VenomGPT depend on those as the core architecture.
+
+Those can be considered optional enrichments only if they are clearly useful and cleanly abstracted.
+
+The primary goal is to build **professional internal VenomGPT multimodal handling**, not a fragile wrapper around provider-specific extras.
+
+## This pass is NOT
+
+This pass is **not**:
+
+* a broad provider expansion phase
+* an image generation phase
+* a video phase
+* an audio phase
+* an MCP ecosystem phase
+* a cosmetic redesign phase
+* a generic “improve everything” pass
+* a vague planning exercise
+
+Do not drift into any of that.
+
+## Job
+
+Audit the current multimodal/image task path end to end and implement the minimum correct architecture needed so VenomGPT can handle screenshot-driven engineering tasks seriously.
+
+The system should behave like this:
+
+### A) Fast hidden task classification + routing
+
+When the user submits a task:
+
+* image/screenshot input must be detected immediately
+* task type classification must happen quickly and mostly invisibly
+* model/path selection must happen automatically in the background
+* the user should not feel routing friction
+
+### B) Screenshot analysis must be genuinely useful
+
+For screenshot-driven tasks, VenomGPT must become much stronger at:
+
+* identifying visible UI defects
+* describing exact broken states
+* distinguishing visible evidence from inference
+* connecting visible defects to likely code areas
+* understanding frontend/layout issues with high precision
+* supporting screenshot + codebase tasks in a grounded way
+
+### C) Frontend/UI issue detection must be first-class
+
+This phase should substantially improve analysis quality for:
+
+* spacing and alignment issues
+* clipping / overflow / truncation
+* z-index / overlay / stacking issues
+* flex/grid misuse
+* hidden or collapsed elements
+* responsive breakpoint problems
+* empty/error/loading states
+* incorrect text / labels / hierarchy
+* broken interaction affordances visible in screenshots
+
+### D) Honest visual execution path
+
+If visual analysis succeeds:
+
+* use the visual findings to guide code inspection and edits
+
+If visual analysis is unavailable:
+
+* fail honestly or degrade only in an explicitly truthful, controlled way
+* do not fabricate visual understanding
+* do not silently pretend the screenshot was understood
+
+### E) Provider-agnostic multimodal architecture
+
+Implement the phase so that:
+
+* multimodal task intake is not hardcoded as “Z.AI forever”
+* vision-capable routing is abstract enough for future provider additions
+* provider-specific capabilities are isolated cleanly behind a small interface / registry / adapter boundary
+* future provider expansion remains possible without redoing the whole multimodal flow
+
+### F) VenomGPT-owned internal tools/logic
+
+Prefer strong internal VenomGPT logic for:
+
+* screenshot task classification
+* visual analysis orchestration
+* code-aware screenshot-to-code bridging
+* frontend issue interpretation
+* routing / capability gating
+* evidence-based result reporting
+
+Optional MCP-backed enrichment is acceptable only if:
+
+* it is clearly useful
+* it is not the core dependency
+* it is abstracted cleanly
+* the product still stands on its own without it
+
+## What to inspect and improve
+
+Audit and improve the relevant current areas, including where needed:
+
+* image attachment intake
+* task classification
+* visual task routing
+* model/provider capability selection
+* vision execution path
+* screenshot-analysis prompting
+* visual-to-code bridging
+* frontend/UI issue interpretation quality
+* honest failure behavior
+* multimodal capability reporting
+* performance/latency of auto model selection for image tasks
+* operator-facing evidence / reporting for multimodal runs
+
+Preserve the already-working execution-oriented architecture.
+
+## Required outcomes
+
+By the end of this pass, VenomGPT should be materially better at real screenshot-driven engineering tasks.
+
+Required outcomes:
+
+1. screenshot tasks route correctly and quickly
+2. auto model/path selection is fast and backgrounded
+3. screenshot analysis quality is materially stronger
+4. frontend/UI defect diagnosis is materially stronger
+5. code-aware follow-through after image understanding is materially better
+6. provider/capability logic is cleaner and more future-proof
+7. no fake multimodal behavior is introduced
+8. no image/video/audio scope sprawl is introduced
+9. current file/command/task behavior does not regress
+
+## Implementation requirements
+
+1. Make real code changes.
+2. Keep the architecture aligned with the current VenomGPT codebase.
+3. Prefer a bounded, high-value implementation batch over scattered tweaks.
+4. Do not add random providers.
+5. Do not broaden to media features outside screenshot-driven engineering tasks.
+6. Do not turn MCP into a mandatory foundation.
+7. If you use MCP-related support at all, keep it optional, abstracted, and non-blocking.
+8. Keep Z.AI as the primary active local path for now, but do not hardcode the architecture as Z.AI-only forever.
+9. Preserve honest capability/failure reporting.
+10. Preserve working execution-quality behavior from earlier phases.
+
+## Verification requirements
+
+You must verify locally and report real results.
+
+At minimum, verify:
+
+1. normal text-only task still works
+2. file task still works
+3. command task still works
+4. screenshot task with a supported visual route behaves correctly
+5. screenshot task identifies visible UI defects with materially useful detail
+6. screenshot + codebase task uses visual findings to guide code inspection in a grounded way
+7. unsupported/unavailable visual case behaves honestly
+8. no fake visual success is reported
+9. TypeScript / build checks remain clean
+
+Use real evidence:
+
+* actual commands
+* actual outputs
+* actual task results
+* actual changed files
+* actual local validation
+
+If a scenario cannot be fully verified because of account entitlement or provider limitation, say that clearly.
+Do not bluff.
+
+## Final response format
+
+1. What I changed
+2. What multimodal path was weak before
+3. How image/screenshot task routing works now
+4. How frontend/UI screenshot analysis improved
+5. How provider-agnostic multimodal handling is structured now
+6. What I intentionally did NOT expand
+7. Files changed
+8. Verification performed
+9. Remaining risks / blocked items / deferred items
+
+Do not stop at analysis.
+Make the code changes, verify them locally, and report real results.

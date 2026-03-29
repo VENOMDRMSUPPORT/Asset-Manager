@@ -31,6 +31,29 @@ export interface ModelResponse {
   laneUsed?: ZaiLane;
 }
 
+/**
+ * Describes what a provider can do for visual/multimodal tasks.
+ * Declared on the ModelProvider interface so callers never need to
+ * check provider-specific types — they use this descriptor instead.
+ *
+ * This is the primary extension point for adding vision to new providers:
+ * implement getVisualTaskCapability() and the rest of the pipeline adapts.
+ */
+export interface VisualTaskCapability {
+  /** Whether this provider/configuration supports image_url input at all. */
+  capable: boolean;
+  /** Which model is selected for vision tasks (first in the fallback chain). */
+  primaryVisionModel: string | null;
+  /** All models available for vision, in fallback order. */
+  visionModelChain: string[];
+  /** Provider-human note about constraints, entitlement, or known limitations. */
+  note: string;
+  /** Maximum images accepted per request. */
+  maxImagesPerRequest: number;
+  /** Maximum size per image (bytes). */
+  maxImageSizeBytes: number;
+}
+
 export interface ModelProvider {
   chat(messages: Message[], options?: ChatOptions): Promise<ModelResponse>;
   chatStream(
@@ -39,11 +62,16 @@ export interface ModelProvider {
     options?: ChatOptions
   ): Promise<ModelResponse>;
   /**
-   * Returns true if this provider can handle vision (image_url) messages.
-   * Z.AI always has glm-4.6v on the PAAS lane.
-   * Replit OpenAI integration does not expose a vision model.
+   * Quick boolean check — true if this provider can handle image_url messages.
+   * Use getVisualTaskCapability() for the full constraint descriptor.
    */
   isVisionCapable(): boolean;
+  /**
+   * Returns the full visual task capability descriptor for this provider.
+   * Use this instead of provider-specific checks anywhere visual task
+   * routing decisions need to be made.
+   */
+  getVisualTaskCapability(): VisualTaskCapability;
 }
 
 export type { ModelSelectionHint };
@@ -626,6 +654,34 @@ class ZaiProvider implements ModelProvider {
     // Replit AI integration does not expose a vision-capable model.
     // Z.AI always has glm-4.6v / glm-4.6v-flash on the PAAS lane.
     return this.config.name === "zai";
+  }
+
+  getVisualTaskCapability(): VisualTaskCapability {
+    if (this.config.name !== "zai") {
+      return {
+        capable:             false,
+        primaryVisionModel:  null,
+        visionModelChain:    [],
+        note:
+          "Replit AI integration does not expose a vision-capable model. " +
+          "Set ZAI_API_KEY to enable screenshot analysis via Z.AI (glm-4.6v / glm-4.6v-flash).",
+        maxImagesPerRequest: 0,
+        maxImageSizeBytes:   0,
+      };
+    }
+
+    const chain = getFallbackChain("vision", this.config.envVisionModelOverride);
+    return {
+      capable:             true,
+      primaryVisionModel:  chain[0]?.modelId ?? null,
+      visionModelChain:    chain.map((c) => c.modelId),
+      note:
+        "Z.AI PAAS lane — glm-4.6v (primary) + glm-4.6v-flash (fallback). " +
+        "Requires the Z.AI PAAS vision model entitlement package on the account. " +
+        "Without entitlement, visual tasks fail honestly with a clear error message.",
+      maxImagesPerRequest: 5,
+      maxImageSizeBytes:   4 * 1024 * 1024,   // 4 MB per image
+    };
   }
 
   async chatStream(
