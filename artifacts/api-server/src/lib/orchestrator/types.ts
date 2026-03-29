@@ -98,6 +98,11 @@ export interface RunState {
   unverifiedWrites:         Set<string>;
   /** Count of verification steps completed (successful run_command or read-back after write). */
   verificationsDone:        number;
+  /**
+   * Number of shell commands blocked because they were detected as file-read
+   * bypass attempts (cat, sed -n, head, tail). Visible in logs for debugging.
+   */
+  shellReadsBlocked:        number;
 }
 
 export function createRunState(profile: ExecutionProfile, operatorMaxSteps: number): RunState {
@@ -116,5 +121,6 @@ export function createRunState(profile: ExecutionProfile, operatorMaxSteps: numb
     consecutiveParseFailures: 0,
     unverifiedWrites:         new Set(),
     verificationsDone:        0,
+    shellReadsBlocked:        0,
   };
 }

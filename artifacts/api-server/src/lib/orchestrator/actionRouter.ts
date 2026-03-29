@@ -7,10 +7,13 @@
  * into the conversation rather than a hard error.
  *
  * Gates checked (in order):
- *   1. Read cap      — blocks read_file once profile.maxFileReads is reached
- *   2. Redundant read — blocks re-reading a file already in the read set
- *   3. Write cap     — blocks write_file once profile.maxFileWrites is reached
- *   4. Verification  — blocks done when unverified writes exist (if profile.requiresVerify)
+ *   1. Shell read bypass — blocks shell commands that effectively read file content
+ *      when the file-read cap is already reached or the file is already read.
+ *      Closes the loophole where `cat`, `sed -n`, `head`, `tail` bypass read_file caps.
+ *   2. Read cap      — blocks read_file once profile.maxFileReads is reached
+ *   3. Redundant read — blocks re-reading a file already in the read set
+ *   4. Write cap     — blocks write_file once profile.maxFileWrites is reached
+ *   5. Verification  — blocks done when unverified writes exist (if profile.requiresVerify)
  */
 
 import type { RunState } from "./types.js";
@@ -22,10 +25,63 @@ export type GateResult =
   | { allowed: false; reason: GateRejectionReason; forcedMessage: string };
 
 export type GateRejectionReason =
+  | "shell_read_redundant"
+  | "shell_read_cap_exceeded"
   | "redundant_read"
   | "read_cap_exceeded"
   | "write_cap_exceeded"
   | "verification_required";
+
+// ─── Shell file-read detection ────────────────────────────────────────────────
+
+/**
+ * Detect whether a shell command is effectively reading file content.
+ * Returns the primary file path being read, or null if not a content-read command.
+ *
+ * Commands counted as file reads:
+ *   - `cat FILE` (without pipe to another command)
+ *   - `sed -n 'X,Yp' FILE` or `sed -n 'Xp' FILE`
+ *   - `head [-n N] FILE` (without additional pipe)
+ *   - `tail [-n N] FILE` (without additional pipe)
+ *   - `less FILE` / `bat FILE` / `more FILE`
+ *
+ * Commands NOT counted (info-only, not full content reads):
+ *   - `wc -l FILE` (line count only)
+ *   - `cat FILE | wc -c` (piped to counter)
+ *   - `grep PATTERN FILE` (search / structural scan)
+ *   - `ls FILE` / `stat FILE` (metadata only)
+ */
+export function detectShellFileRead(command: string): string | null {
+  const cmd = command.trim();
+
+  // Reject any command with a pipe — these are typically info transforms, not content reads.
+  // The one exception: we still check if the base command is a naked read before the pipe.
+  // Simple rule: if there's a pipe, it's not a raw content read.
+  if (cmd.includes("|")) return null;
+
+  // `cat FILE` — exact cat of a single file, no redirection
+  const catMatch = cmd.match(/^cat\s+(['"]?)([^\s'"<>|;]+)\1\s*$/);
+  if (catMatch) return catMatch[2];
+
+  // `sed -n 'X[,Y]p' FILE` — partial or full content read via sed
+  // Matches: sed -n '350,770p' file.tsx  OR  sed -n '1p' file
+  const sedMatch = cmd.match(/^sed\b[^|<>]*\s-n\s+['"][\d,~$]+p['"]\s+(['"]?)([^\s'"<>|;]+)\1\s*$/);
+  if (sedMatch) return sedMatch[2];
+
+  // `head [-n N] FILE` or `head FILE` — reads top N lines
+  const headMatch = cmd.match(/^head\s+(?:-[nql]\s+\d+\s+)?(['"]?)([^\s'"<>|;-][^\s'"<>|;]*)\1\s*$/);
+  if (headMatch) return headMatch[2];
+
+  // `tail [-n N] FILE` or `tail FILE` — reads bottom N lines
+  const tailMatch = cmd.match(/^tail\s+(?:-[nf]\s+\d+\s+)?(['"]?)([^\s'"<>|;-][^\s'"<>|;]*)\1\s*$/);
+  if (tailMatch) return tailMatch[2];
+
+  // `less FILE` / `bat FILE` / `more FILE` — pager commands (full file content)
+  const pagerMatch = cmd.match(/^(?:less|bat|more)\s+(['"]?)([^\s'"<>|;]+)\1\s*$/);
+  if (pagerMatch) return pagerMatch[2];
+
+  return null;
+}
 
 // ─── Main gate function ───────────────────────────────────────────────────────
 
@@ -41,6 +97,49 @@ export function gateAction(
   const actionType = String(action["action"] ?? "");
 
   switch (actionType) {
+
+    // ── Shell command: check for file-read bypass before allowing execution ──
+    case "run_command": {
+      const command = String(action["command"] ?? "");
+      const readPath = detectShellFileRead(command);
+
+      if (readPath !== null) {
+        // Normalize the path for comparison (trim slashes, quotes)
+        const normalizedPath = readPath.replace(/^["']|["']$/g, "");
+
+        // Gate A: File already read this session (redundant shell read)
+        if (normalizedPath && state.filesRead.has(normalizedPath)) {
+          return {
+            allowed: false,
+            reason:  "shell_read_redundant",
+            forcedMessage:
+              `ORCHESTRATOR: Shell read blocked — "${normalizedPath}" was already read this session. ` +
+              `Shell commands (cat, sed, head, tail) are subject to the same file-read policy as read_file. ` +
+              `You already have the content of this file in context. ` +
+              `Do not re-read it via shell commands. Proceed with the next action.`,
+          };
+        }
+
+        // Gate B: Read cap exceeded (shell command would exceed budget)
+        if (state.filesRead.size >= state.profile.maxFileReads) {
+          const readList = [...state.filesRead].join(", ");
+          return {
+            allowed: false,
+            reason:  "shell_read_cap_exceeded",
+            forcedMessage:
+              `ORCHESTRATOR: Shell read blocked — file-read cap reached ` +
+              `(${state.profile.maxFileReads} reads for ${state.profile.category} tasks). ` +
+              `Shell commands that read file content (cat, sed -n, head, tail) count against the same cap as read_file. ` +
+              `Already read: ${readList || "(none)"}. ` +
+              `Do not attempt to read additional file content via shell commands. ` +
+              `Work with the information you have, or call done if the task is blocked.`,
+          };
+        }
+      }
+
+      return { allowed: true };
+    }
+
     case "read_file": {
       const path = String(action["path"] ?? "");
 
@@ -63,7 +162,7 @@ export function gateAction(
           allowed: false,
           reason:  "read_cap_exceeded",
           forcedMessage:
-            `ORCHESTRATOR: File read cap reached (${state.profile.maxFileReads} for ${state.profile.category} tasks). ` +
+            `ORCHESTRATOR: File read cap reached (${state.profile.maxFileReads} reads allowed for ${state.profile.category} tasks). ` +
             `Already read: ${readList || "(none)"}. ` +
             `No additional file reads are authorized. ` +
             `Write the fix based on what you have already inspected, or call done if the task is complete.`,
@@ -81,7 +180,7 @@ export function gateAction(
           allowed: false,
           reason:  "write_cap_exceeded",
           forcedMessage:
-            `ORCHESTRATOR: File write cap reached (${state.profile.maxFileWrites} for ${state.profile.category} tasks). ` +
+            `ORCHESTRATOR: File write cap reached (${state.profile.maxFileWrites} writes allowed for ${state.profile.category} tasks). ` +
             `Already written: ${writeList || "(none)"}. ` +
             `Consolidate remaining changes into the files you have already modified, or call done.`,
         };
@@ -171,7 +270,16 @@ export function updateStateAfterAction(
     case "run_command": {
       const command = String(action["command"] ?? "");
       state.commandsRun.push(command);
+
       if (success) {
+        // If this command is a shell-based file read that was ALLOWED (passed the gate),
+        // track the path in filesRead so subsequent reads of the same file are blocked.
+        const readPath = detectShellFileRead(command);
+        if (readPath !== null) {
+          const normalizedPath = readPath.replace(/^["']|["']$/g, "");
+          if (normalizedPath) state.filesRead.add(normalizedPath);
+        }
+
         // A successful command clears unverified writes (it IS the verification step)
         state.unverifiedWrites.clear();
         state.verificationsDone++;
@@ -185,4 +293,14 @@ export function updateStateAfterAction(
       break;
     }
   }
+}
+
+// ─── Gate block counter ───────────────────────────────────────────────────────
+
+/**
+ * Increment the shell-reads-blocked counter. Called by agentLoop when a
+ * shell read bypass is blocked, for operator-visible telemetry.
+ */
+export function recordShellReadBlocked(state: RunState): void {
+  state.shellReadsBlocked++;
 }

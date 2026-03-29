@@ -1,0 +1,183 @@
+Phase 09 should now begin.
+
+Phase 08 is accepted as a major orchestration architecture leap.
+
+VenomGPT now has:
+
+* task routing
+* execution profiles
+* selective planning
+* structured orchestration visibility
+* stronger execution discipline than the earlier linear loop
+
+So the next problem is no longer “lack of orchestration structure.”
+
+The next problem is this:
+
+**execution control is still not strict enough to be considered truly trustworthy orchestration.**
+
+This is a focused **Phase 09 — Safe Execution Control Pass**.
+
+## Current state
+
+VenomGPT already has a stronger orchestration architecture.
+
+However, the validation of Phase 08 exposed important control weaknesses:
+
+* read caps can still be bypassed indirectly through shell-based file reads (`sed`, `cat`, similar)
+* some task types, especially visual tasks, can burn step budgets inefficiently
+* routing classification still wastes work on some conversational/factual prompts
+* execution safety is stronger than before, but still not tight enough for serious orchestration maturity
+
+So this phase is not a broad new architecture phase.
+
+This is a bounded control-tightening pass.
+
+## Job
+
+Implement a major but bounded Safe Execution Control pass.
+
+Do not stop at analysis.
+
+Make the code changes.
+
+## Goal
+
+Tighten execution governance so that VenomGPT behaves more like a trustworthy orchestrator and less like a system that can still “work around” its own constraints.
+
+The goal is not only to have structure.
+
+The goal is to make that structure actually control behavior.
+
+## Required outcomes
+
+1. Close or materially reduce the current loophole where file-read limits can be bypassed through shell commands that effectively read files.
+
+2. Strengthen action governance so step caps, read caps, and task profiles are enforced more honestly and consistently.
+
+3. Improve routing classification for low-effort conversational/factual tasks so they do not waste workspace-oriented execution work.
+
+4. Improve budget discipline for visual tasks and other exploration-heavy tasks so they do not burn large portions of the budget unnecessarily.
+
+5. Preserve the orchestration architecture introduced in Phase 08.
+
+6. Preserve all currently working task classes:
+
+   * text-only tasks
+   * file-edit tasks
+   * verification tasks
+   * visual tasks
+   * task history and execution feed
+
+## What to inspect and fix
+
+Audit and improve the real control surfaces involved in execution safety and action discipline, including where relevant:
+
+* action router enforcement
+* shell command governance
+* file-read accounting
+* step budget enforcement
+* route/task classification logic
+* visual task profile tuning
+* execution-profile caps and how they are actually applied
+* loopholes between nominal policy and real runtime behavior
+* operator-facing visibility when the system refuses, blocks, or limits an action
+
+## Important design direction
+
+Do not solve this by simply making caps larger.
+
+Do not solve this by pretending shell reads are harmless.
+
+Do not solve this by weakening the limits.
+
+The point of this phase is to make the limits and profiles more real, more trustworthy, and more aligned with actual behavior.
+
+## Implementation requirements
+
+1. Keep this phase tightly scoped to execution control and governance.
+
+2. Do not start a broad platform-services phase.
+
+3. Do not redesign the UI.
+
+4. Do not add deploy/integration/MCP scope here.
+
+5. Do not weaken honesty or evidence discipline.
+
+6. If shell-based file reading needs to be accounted for or restricted, implement that properly.
+
+7. If read caps need smarter accounting rather than naive blocking, implement that intelligently.
+
+8. If task routing for factual/conversational prompts needs a lighter-weight path, implement that cleanly.
+
+9. If visual-task step/read budgets need tuning, do it in a way grounded in observed behavior, not guesswork.
+
+10. Make operator-visible behavior clearer when a limit is hit or an action is blocked.
+
+## Strong preference
+
+This pass should make the system feel more trustworthy.
+
+Not just more sophisticated.
+
+I want the orchestration layer to become harder to game, easier to reason about, and better aligned with the limits it claims to enforce.
+
+## Guardrails
+
+Do NOT turn this into:
+
+* a broad new orchestration redesign
+* a full isolation/checkpoint system yet
+* a deploy/platform phase
+* generic performance tuning
+* more feature breadth
+* analysis without implementation
+
+This is a Safe Execution Control pass.
+
+## Verification requirements
+
+You must verify with real evidence, not claims.
+
+At minimum, verify all of the following locally:
+
+1. A text-only factual/conversational task still works and does not waste unnecessary orchestration work.
+
+2. A code-edit task still works.
+
+3. A verification-heavy task still works.
+
+4. A visual task still works.
+
+5. A task that previously could exploit shell-based reads to bypass read caps is now controlled more honestly.
+
+6. Route/profile limits are now more trustworthy in real runtime behavior.
+
+7. If an action is blocked or limited, the operator can understand why.
+
+You must show:
+
+* the exact tasks used
+* before/after control behavior where possible
+* evidence of tighter enforcement
+* logs / task feed evidence
+* exact commands run
+* what remains intentionally deferred
+
+## Final response format
+
+1. What I changed
+2. What control weaknesses existed before
+3. How execution control is tighter now
+4. How routing/task classification improved
+5. Files changed
+6. Verification performed
+7. Remaining limitations
+8. Whether Phase 09 materially improved execution trustworthiness
+
+Important instruction
+
+Do not stop at analysis.
+Do not give me a policy description without implementation.
+Make the code changes, tighten execution control for real, and verify it with evidence.

@@ -33,7 +33,7 @@ import { logger } from "./logger.js";
 // ─── Orchestrator imports ──────────────────────────────────────────────────────
 import { routeTask }                         from "./orchestrator/taskRouter.js";
 import { runPlanningPhase, formatPlanForContext } from "./orchestrator/planner.js";
-import { gateAction, updateStateAfterAction } from "./orchestrator/actionRouter.js";
+import { gateAction, updateStateAfterAction, recordShellReadBlocked } from "./orchestrator/actionRouter.js";
 import { createRunState }                    from "./orchestrator/types.js";
 import type { RunState }                     from "./orchestrator/types.js";
 
@@ -60,15 +60,46 @@ function failTask(taskId: string, task: AgentTask, summary: string, failure: Tas
 }
 
 // ─── Conversational bypass ────────────────────────────────────────────────────
-// Short greetings and acks go through a single lightweight chat call rather
-// than the full agent loop. This prevents "no valid JSON action" parse errors.
+// Greetings and short general-knowledge questions bypass the full agent loop.
+// This saves ~2s workspace scan latency and avoids "no valid JSON action" errors
+// on prompts that have no codebase intent at all.
+//
+// Two tiers:
+//   1. GREETING_RE   — social/ack phrases (≤ 80 chars, always bypassed)
+//   2. Factual check — short question with no codebase references (≤ 120 chars)
+//
+// A prompt is NOT bypassed if it:
+//   - References file extensions (.ts, .tsx, .js, etc.)
+//   - Uses codebase possessives ("my code", "our project", "this component")
+//   - Contains a path-like string (/src/, /lib/, etc.)
+//   - Mentions specific files, functions, or classes by common dev noun patterns
 
-const CONVERSATIONAL_RE = /^(hi|hello|hey|thanks|thank you|thx|ty|ok|okay|cool|great|bye|goodbye|yes|no|yep|nope|yeah|sure|got it|sounds good|perfect|nice|alright|what|huh)[\s!.,?]*$/i;
+/** Pure social phrases — need zero information to respond. */
+const GREETING_RE =
+  /^(hi|hello|hey|thanks|thank you|thx|ty|ok|okay|cool|great|bye|goodbye|yes|no|yep|nope|yeah|sure|got it|sounds good|perfect|nice|alright|what|huh)[\s!.,?]*$/i;
+
+/** Patterns that indicate the prompt references the user's codebase. */
+const CODEBASE_REF_RE =
+  /\b(?:my|our|this)\s+(?:project|codebase|repo|code|file|component|function|module|class|type|interface|hook|service|route|endpoint|controller|model|schema|test|spec|build|config)\b|\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|cs|cpp|c|h|sh|json|yaml|yml|toml|env|md)\b|\/(?:[a-z][\w-]+\/)/i;
+
+/** Opening words that signal a factual question requiring no file access. */
+const FACTUAL_QUESTION_RE =
+  /^(?:what|who|when|where|which|how|why|is|are|does|do|can|could|what's|who's|define|explain what)\b/i;
 
 function isConversationalPrompt(prompt: string): boolean {
   const t = prompt.trim();
-  if (t.length > 80) return false;
-  return CONVERSATIONAL_RE.test(t);
+
+  // Tier 1: strict greetings — always bypass (very short)
+  if (t.length <= 80 && GREETING_RE.test(t)) return true;
+
+  // Tier 2: short factual question with no codebase context
+  if (
+    t.length <= 120 &&
+    FACTUAL_QUESTION_RE.test(t) &&
+    !CODEBASE_REF_RE.test(t)
+  ) return true;
+
+  return false;
 }
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -823,25 +854,19 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
       }
 
       // ── Task routing ─────────────────────────────────────────────────────
-      // Classifies the task and selects an execution profile (step budget, file
-      // caps, verification requirements, planning phase flag).
-      const profile = routeTask(prompt, taskMeta.isVisual, taskMeta.isVisual ? visualIntent : undefined);
-      emit(taskId, "route", `${profile.category}: ${profile.description}`, {
-        category:       profile.category,
-        maxSteps:       profile.maxSteps,
-        maxFileReads:   profile.maxFileReads,
-        maxFileWrites:  profile.maxFileWrites,
-        requiresVerify: profile.requiresVerify,
-        planningPhase:  profile.planningPhase,
-      });
-      logger.info(
-        { taskId, category: profile.category, maxSteps: profile.maxSteps, maxFileReads: profile.maxFileReads },
-        "[Orchestrator] Task routed"
-      );
-
-      // ── Conversational bypass ─────────────────────────────────────────────
-      if (isConversationalPrompt(prompt)) {
-        logger.info({ taskId, prompt }, "Conversational prompt — direct response path");
+      // Conversational check runs FIRST so the route event is correct.
+      // Short greetings / general-knowledge questions skip workspace scan + agent loop.
+      if (!taskMeta.isVisual && isConversationalPrompt(prompt)) {
+        // Emit the correct route event BEFORE entering the bypass path.
+        emit(taskId, "route", "conversational: Direct response — no workspace access needed", {
+          category:       "conversational",
+          maxSteps:       2,
+          maxFileReads:   0,
+          maxFileWrites:  0,
+          requiresVerify: false,
+          planningPhase:  false,
+        });
+        logger.info({ taskId, prompt }, "[Orchestrator] Conversational prompt — direct response path");
         emit(taskId, "status", "Responding…");
 
         let model;
@@ -887,24 +912,44 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
         return;
       }
 
+      // ── Task routing (non-conversational) ────────────────────────────────
+      // Classifies the task and selects an execution profile (step budget, file
+      // caps, verification requirements, planning phase flag).
+      const profile = routeTask(prompt, taskMeta.isVisual, taskMeta.isVisual ? visualIntent : undefined);
+      emit(taskId, "route", `${profile.category}: ${profile.description}`, {
+        category:       profile.category,
+        maxSteps:       profile.maxSteps,
+        maxFileReads:   profile.maxFileReads,
+        maxFileWrites:  profile.maxFileWrites,
+        requiresVerify: profile.requiresVerify,
+        planningPhase:  profile.planningPhase,
+      });
+      logger.info(
+        { taskId, category: profile.category, maxSteps: profile.maxSteps, maxFileReads: profile.maxFileReads },
+        "[Orchestrator] Task routed"
+      );
+
       // ── Project intelligence ──────────────────────────────────────────────
       // Build (or retrieve from cache) the project index and select files
       // likely relevant to this specific prompt. This replaces the raw
       // full-tree dump with a focused, metadata-enriched summary.
       //
-      // Skip for "describe" visual intent: user wants a direct answer from the
-      // screenshot — no file reading, writing, or CSS inspection needed.
+      // Skip for: (a) "describe" visual intent — no file reading needed;
+      //           (b) conversational profile — no codebase access at all.
       // Skipping saves ~1–2s of I/O and avoids injecting irrelevant file context.
 
       let workspaceSnapshot = "";
       let projectIntelligence = "";
       let projectIndex: ProjectIndex | null = null;   // kept for visual debug file selection
 
-      const skipWorkspaceScan = taskMeta.isVisual && visualIntent === "describe";
+      const skipWorkspaceScan =
+        (taskMeta.isVisual && visualIntent === "describe") ||
+        profile.maxFileReads === 0;
 
       if (skipWorkspaceScan) {
-        emit(taskId, "status", "Describe intent — skipping workspace scan…");
-        logger.debug({ taskId, visualIntent }, "[VenomGPT] Workspace scan skipped (describe path)");
+        const skipReason = profile.maxFileReads === 0 ? "no-read profile" : "describe intent";
+        emit(taskId, "status", `Skipping workspace scan (${skipReason})…`);
+        logger.debug({ taskId, skipReason, visualIntent }, "[VenomGPT] Workspace scan skipped");
       } else {
         emit(taskId, "status", "Analysing workspace…");
         try {
@@ -1375,11 +1420,27 @@ Do not read files speculatively. Do not read files to "understand the codebase".
         // and continues the loop without counting as a real step output.
         const gate = gateAction(action, runState);
         if (!gate.allowed) {
+          // Track shell-read bypass attempts separately for operator telemetry
+          if (gate.reason === "shell_read_redundant" || gate.reason === "shell_read_cap_exceeded") {
+            recordShellReadBlocked(runState);
+          }
+
+          // Human-readable gate labels for the operator status feed
+          const gateLabel: Record<string, string> = {
+            shell_read_redundant:  "Blocked: shell read of already-read file",
+            shell_read_cap_exceeded: "Blocked: shell read would exceed file-read cap",
+            redundant_read:        "Blocked: file already read this session",
+            read_cap_exceeded:     "Blocked: file-read cap reached",
+            write_cap_exceeded:    "Blocked: file-write cap reached",
+            verification_required: "Blocked: verification required before done",
+          };
+          const label = gateLabel[gate.reason] ?? `Blocked: ${gate.reason.replace(/_/g, " ")}`;
+
           logger.info(
-            { taskId, step: runState.step, actionType, reason: gate.reason },
+            { taskId, step: runState.step, actionType, reason: gate.reason, shellReadsBlocked: runState.shellReadsBlocked },
             `[Orchestrator] Action router blocked ${actionType} (${gate.reason})`
           );
-          emit(taskId, "status", `[Orchestrator] ${gate.reason.replace(/_/g, " ")}`);
+          emit(taskId, "status", `[Orchestrator] ${label}`);
           messages.push({ role: "user", content: gate.forcedMessage });
           continue;
         }
