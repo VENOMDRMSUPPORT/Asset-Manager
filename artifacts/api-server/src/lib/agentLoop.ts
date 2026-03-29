@@ -22,6 +22,7 @@ import {
   selectVisualDebugFiles,
   selectVisualAwareFiles,
   extractVisualKeywords,
+  extractComponentNames,
   buildProjectSummary,
   invalidateProjectIndex,
   type ProjectIndex,
@@ -713,38 +714,59 @@ function buildVisualCodeBridge(
   index:         ProjectIndex,
   userPrompt:    string,
   visualContext: string,
-  maxFiles:      number = 8
+  maxFiles:      number = 4,  // Phase 07A: reduced from 8 — precision over breadth
+  maxReads:      number = 2   // hard read cap given to agent in protocol text
 ): string {
-  const scored    = selectVisualAwareFiles(index, userPrompt, visualContext, maxFiles);
-  const keywords  = extractVisualKeywords(visualContext);
+  const scored       = selectVisualAwareFiles(index, userPrompt, visualContext, maxFiles);
+  const { strong, weak } = classifyVisualTerms(visualContext);
 
   const lines: string[] = [];
 
-  lines.push("VISUAL-CODE BRIDGE:");
-  lines.push("(Evidence-grounded file targets derived from screenshot analysis + project index)");
+  lines.push("VISUAL-CODE BRIDGE");
+  lines.push("══════════════════════════════════════════════════");
+
+  // Show the extracted terms so the agent (and logs) can verify what drove targeting
+  if (strong.length > 0) {
+    lines.push(`Component names (high-confidence): ${strong.join(", ")}`);
+  }
+  if (weak.length > 0) {
+    lines.push(`Layout terms  (low-confidence):   ${weak.slice(0, 8).join(", ")}`);
+  }
   lines.push("");
 
-  if (keywords.length > 0) {
-    lines.push(`Visual terms extracted from screenshot: ${keywords.slice(0, 12).join(", ")}`);
-    lines.push("");
-  }
+  // Authoritative read cap — agent must respect this
+  const readCap = Math.min(maxReads, scored.length || 1);
+  lines.push(`AUTHORIZED READS: ${readCap} file${readCap !== 1 ? "s" : ""} maximum.`);
+  lines.push("Read #1 first. If the defect is found → STOP and write the fix.");
+  lines.push(`Only read #2${readCap > 2 ? `–#${readCap}` : ""} if #1 does not contain the responsible code.`);
+  lines.push("");
 
   if (scored.length === 0) {
-    lines.push("No files scored above threshold for visual-debug relevance.");
-    lines.push("Inspect: CSS/style files and layout components at the project root first.");
+    lines.push("No files scored above threshold. If a component was named in the analysis,");
+    lines.push("search for a file whose name matches that component. Else inspect the main CSS file.");
   } else {
-    lines.push("Ranked file targets (visual evidence + prompt relevance combined):");
-    for (const { file, reasons } of scored) {
-      const reasonStr = reasons.length > 0 ? ` — ${reasons.slice(0, 3).join("; ")}` : "";
-      lines.push(`  ${file.path}${reasonStr}`);
-    }
-    lines.push("");
-    lines.push("Start inspection from the TOP of this list.");
-    lines.push("If a file does not contain the defect, move to the next.");
-    lines.push("Do NOT read files below the visible defect's ownership area.");
+    lines.push("Ranked candidates (visual evidence strength → prompt relevance):");
+    scored.forEach(({ file, reasons, score }, idx) => {
+      const tag     = idx === 0 ? " ← START HERE" : "";
+      const topReasons = reasons.slice(0, 2).join("; ") || "general relevance";
+      lines.push(`  #${idx + 1}  ${file.path}  [score=${score}]${tag}`);
+      lines.push(`       ${topReasons}`);
+    });
   }
 
+  lines.push("══════════════════════════════════════════════════");
   return lines.join("\n");
+}
+
+/** Split visual terms into high-confidence (CamelCase/quoted) vs generic region terms */
+function classifyVisualTerms(visualContext: string): { strong: string[]; weak: string[] } {
+  const compNames   = extractComponentNames(visualContext).map((e) => e.kebab);
+  const allKeywords = extractVisualKeywords(visualContext);
+  const compSet     = new Set(compNames);
+  return {
+    strong: compNames,
+    weak:   allKeywords.filter((k) => !compSet.has(k)),
+  };
 }
 
 // ─── Main task runner ─────────────────────────────────────────────────────────
@@ -1026,107 +1048,106 @@ Do NOT read existing code files. Do NOT run build commands. Go directly to write
           }
 
           case "fix": {
-            // ── Fix protocol: vision → visual-code bridge → inspect → edit → verify ─
-            // Phase 07: file selection now scored against BOTH prompt keywords AND
-            // keywords extracted from the vision analysis (component names, CSS
-            // terms, UI region names).  The bridge section explicitly shows the
-            // agent WHY each file was selected so it can prioritise correctly.
+            // ── Fix protocol (Phase 07A): vision → bridge → inspect ≤2 files → edit ─
+            // Key discipline: NO planning step (wasted model call), hard read cap,
+            // explicit anti-report instruction, numbered bridge with read authorization.
             let bridgeSection = "";
+            let bridgeTermCount = 0;
             if (projectIndex) {
-              const bridgeKeywords = extractVisualKeywords(visualContext);
-              bridgeSection = "\n\n" + buildVisualCodeBridge(projectIndex, prompt, visualContext, 8);
+              const { strong, weak } = classifyVisualTerms(visualContext);
+              bridgeTermCount = strong.length + weak.length;
+              bridgeSection = "\n\n" + buildVisualCodeBridge(projectIndex, prompt, visualContext, 4, 2);
               emit(taskId, "status",
-                `[Phase07] Visual-code bridge: ${bridgeKeywords.length} terms extracted → file targets ranked`
+                `Visual targeting: ${strong.length} component name${strong.length !== 1 ? "s" : ""} (${strong.slice(0, 3).join(", ") || "none"}) + ${weak.length} layout terms → ${Math.min(4, projectIndex.files.length)} candidates ranked`
               );
               logger.debug(
-                { taskId, visualTerms: bridgeKeywords.length, bridgeSection: bridgeSection.slice(0, 200) },
-                "[VenomGPT][Phase07] Visual-code bridge built for fix intent"
+                { taskId, strongTerms: strong.length, weakTerms: weak.length, bridgeSection: bridgeSection.slice(0, 300) },
+                "[VenomGPT][Phase07A] Visual-code bridge built for fix intent"
               );
             }
             userPromptParts.push(
               `VISUAL FIX PROTOCOL:${bridgeSection}
 
-STEP 1 — PLANNING: Identify the specific defect(s) and CSS root-cause from the analysis.
-  State your plan: which component owns the layout, which CSS property is wrong, what the fix will be.
-  Do this BEFORE reading any code.
+THIS IS A CODE FIX TASK — NOT A REPORT OR ANALYSIS TASK.
+Do NOT write a general analysis. Do NOT describe what you see. Fix the specific defect.
 
-STEP 2 — INSPECTING: Read files from the VISUAL-CODE BRIDGE ranked list above (most relevant first).
-  Stop reading once you have found the exact rule responsible for the visible defect.
-  Defect → where to look:
-  • Spacing/alignment → padding, margin, gap on container or children
-  • Overflow/clipping → overflow: hidden, max-height, height on ancestor containers
-  • Flex/grid → display: flex/grid on parent, then justify-content, align-items, flex-wrap, grid-template
-  • Z-index/stacking → position: relative/absolute/fixed, z-index, isolation: isolate
-  • Sizing → width, height, min-*, max-*, flex-basis, flex-grow, flex-shrink
-  • Typography → overflow, text-overflow: ellipsis, white-space: nowrap, max-width on text containers
-  • State visibility → conditional class logic, display: none / visibility: hidden, opacity: 0
+HARD CONSTRAINT: READ AT MOST 2 FILES total. The VISUAL-CODE BRIDGE above tells you which ones.
 
-STEP 3 — EDITING: Fix the CSS rule in the component that OWNS the layout. Write the complete file.
+STEP 1 — INSPECT (#1 file only):
+  Open the #1 ranked file from the bridge. Find the CSS rule or component property causing the visible defect.
+  Defect-to-property lookup:
+  • Clipping / overflow → overflow: hidden, max-height, height on ancestors
+  • Spacing wrong → padding, margin, gap on container or children
+  • Misaligned → flex/grid: justify-content, align-items, flex-wrap on parent
+  • Sizing wrong → width, height, flex-basis, min-/max- constraints
+  • Text truncation → text-overflow, white-space, overflow, max-width on text element
+  • Not visible → display: none, visibility: hidden, opacity: 0, z-index
+  → If you find the responsible rule: go directly to STEP 2.
+  → If not found: read the #2 file ONLY. Then go to STEP 2 regardless.
 
-STEP 4 — VERIFYING: Confirm the change targets the exact visual symptom.
-  Done action must state: VISUAL DEFECT → FILE → RULE CHANGED → RESOLUTION.`
+STEP 2 — EDIT: Write the corrected file immediately. Do not read more files before editing.
+  If uncertain which exact value to use, apply the most reasonable fix based on the visual defect.
+
+STEP 3 — DONE: State exactly: DEFECT SEEN → FILE CHANGED → RULE CHANGED → EXPECTED RESULT.
+  Do not add a preamble. Do not re-describe the screenshot. Just the fix summary.`
             );
-            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using fix protocol (Phase 07 visual-code bridge)");
+            logger.debug({ taskId, visualIntent, bridgeTermCount }, "[VenomGPT] Using fix protocol (Phase 07A: inspect≤2, no planning step)");
             break;
           }
 
           case "improve": {
-            // ── Improve protocol: vision → visual-code bridge → explore → implement ─
-            // Phase 07: same bridge approach as fix — scored by visual terms.
+            // ── Improve protocol (Phase 07A): bridge → inspect ≤2 files → implement ─
             let bridgeSection = "";
             if (projectIndex) {
-              const bridgeKeywords = extractVisualKeywords(visualContext);
-              bridgeSection = "\n\n" + buildVisualCodeBridge(projectIndex, prompt, visualContext, 8);
+              const { strong, weak } = classifyVisualTerms(visualContext);
+              bridgeSection = "\n\n" + buildVisualCodeBridge(projectIndex, prompt, visualContext, 4, 2);
               emit(taskId, "status",
-                `[Phase07] Visual-code bridge: ${bridgeKeywords.length} terms extracted → component targets ranked`
+                `Visual targeting: ${strong.length} component name${strong.length !== 1 ? "s" : ""} (${strong.slice(0, 3).join(", ") || "none"}) + ${weak.length} layout terms → candidates ranked`
               );
               logger.debug(
-                { taskId, visualTerms: bridgeKeywords.length },
-                "[VenomGPT][Phase07] Visual-code bridge built for improve intent"
+                { taskId, strongTerms: strong.length, weakTerms: weak.length },
+                "[VenomGPT][Phase07A] Visual-code bridge built for improve intent"
               );
             }
             userPromptParts.push(
               `VISUAL IMPROVE PROTOCOL:${bridgeSection}
 
-The visual analysis above lists specific UI/UX improvement opportunities.
+The visual analysis above lists specific improvement opportunities. This is an implementation task, not a report.
 
-STEP 1 — PLAN: Decide which improvements from the analysis are highest-value and feasible.
-  State which visual-code bridge files you will read first and why.
+HARD CONSTRAINT: READ AT MOST 2 FILES. Use the VISUAL-CODE BRIDGE above to choose which.
 
-STEP 2 — EXPLORE: Read the relevant component files (VISUAL-CODE BRIDGE list above) to understand current implementation.
-  Focus only on the files that own the components shown in the screenshot.
+STEP 1 — INSPECT (#1 file, then #2 if needed):
+  Read only the files that own the components the analysis flagged. Find the current implementation.
 
-STEP 3 — IMPLEMENT: Apply the improvements. Each change must trace back to a specific finding in the analysis:
-  • Prefer Tailwind utility changes for spacing, color, typography.
-  • Prefer component structure changes for hierarchy or density issues.
-  • Prefer CSS variable changes for system-wide consistency.
-  Do not refactor unrelated code.
+STEP 2 — IMPLEMENT: Apply each improvement that has a clear visual basis.
+  • Tailwind utilities → spacing, color, typography changes
+  • Component structure → hierarchy, density, layout changes
+  • CSS variables → system-wide token changes
+  Do not refactor unrelated code. Do not write a report.
 
-STEP 4 — VERIFY: Read the changed file(s) back to confirm edits are correct.
-
-STEP 5 — DONE: Summarize: VISUAL FINDING → CODE CHANGE → EXPECTED RESULT for each improvement made.`
+STEP 3 — DONE: VISUAL FINDING → CODE CHANGE → EXPECTED RESULT for each change made.
+  Be direct. No preamble.`
             );
-            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using improve protocol (Phase 07 visual-code bridge)");
+            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using improve protocol (Phase 07A: inspect≤2, direct action)");
             break;
           }
 
           case "analyze": {
-            // ── Analyze protocol: vision → assess → optionally inspect code ───
-            // Phase 07: for analyze intent, also inject the visual-code bridge
-            // so the agent CAN inspect code if the analysis points to specific
-            // components — but it must decide whether code inspection is needed.
+            // ── Analyze protocol (Phase 07A): vision → direct assessment → done ──
+            // Default is done with inline summary. Only write a file if user
+            // explicitly requested a written report. Do NOT default to file output.
             let bridgeSection = "";
             if (projectIndex) {
-              const bridgeKeywords = extractVisualKeywords(visualContext);
-              bridgeSection = "\n\n" + buildVisualCodeBridge(projectIndex, prompt, visualContext, 6);
-              if (bridgeKeywords.length > 0) {
+              const { strong, weak } = classifyVisualTerms(visualContext);
+              bridgeSection = "\n\n" + buildVisualCodeBridge(projectIndex, prompt, visualContext, 4, 1);
+              if (strong.length > 0 || weak.length > 0) {
                 emit(taskId, "status",
-                  `[Phase07] Visual-code bridge: ${bridgeKeywords.length} terms → code targets available if needed`
+                  `Visual targeting: ${strong.length} component${strong.length !== 1 ? "s" : ""} identified — code bridge available for verification`
                 );
               }
               logger.debug(
-                { taskId, visualTerms: bridgeKeywords.length },
-                "[VenomGPT][Phase07] Visual-code bridge built for analyze intent"
+                { taskId, strongTerms: strong.length, weakTerms: weak.length },
+                "[VenomGPT][Phase07A] Visual-code bridge built for analyze intent"
               );
             }
             userPromptParts.push(
@@ -1134,20 +1155,20 @@ STEP 5 — DONE: Summarize: VISUAL FINDING → CODE CHANGE → EXPECTED RESULT f
 
 The visual analysis above contains a structured assessment of the screenshot(s).
 
-Determine the most useful response:
-• If the user asked for a written analysis/report → write it to a file directly, then verify, then done.
-• If the user wants a direct assessment → use done with your analysis as the summary.
-• If the analysis identified a specific defect in a named component → you MAY inspect the relevant file
-  from the VISUAL-CODE BRIDGE above to verify whether the code matches the visual finding.
-  Only do this if it meaningfully improves the quality of the analysis. Do not read files speculatively.
+DEFAULT RESPONSE: Use the done action with your assessment in the summary field.
+  Do NOT write a file unless the user explicitly asked to "write a report", "save an analysis", or "create a document".
 
-Either way:
-  • State what is visually observed, what is inferred, and what remains unconfirmed.
-  • Cover both working aspects and areas for improvement.
-  • State the single highest-priority actionable next step.
-  • Do not invent root causes not shown visually or confirmed by code inspection.`
+Deliver the assessment directly:
+  • What is working well in the screenshot.
+  • What specific defects or issues were identified.
+  • What is inferred vs confirmed from visual evidence alone.
+  • The single highest-priority action to take next.
+
+OPTIONAL (only if a specific named component was flagged AND inspecting its code would materially
+improve the assessment accuracy): Read at most 1 file from the VISUAL-CODE BRIDGE above.
+Do not read files speculatively. Do not read files to "understand the codebase".`
             );
-            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using analyze protocol (Phase 07 with code bridge)");
+            logger.debug({ taskId, visualIntent }, "[VenomGPT] Using analyze protocol (Phase 07A: direct done, no default report)");
             break;
           }
         }

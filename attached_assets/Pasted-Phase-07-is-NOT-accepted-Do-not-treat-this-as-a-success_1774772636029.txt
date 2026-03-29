@@ -1,0 +1,202 @@
+Phase 07 is NOT accepted.
+
+Do not treat this as a successful phase completion.
+
+The last attempt proved that VenomGPT can still do screenshot analysis and write a report, but it did NOT prove the actual goal of Phase 07:
+
+**visual understanding must materially improve code-oriented action targeting**
+
+It also behaved too slowly and too broadly.
+
+A screenshot-driven task took far too long while wandering through irrelevant files and producing a report-heavy result instead of a precise action-oriented result.
+
+That is not acceptable.
+
+This is now a focused **Phase 07A Correction Pass — Visual Targeting Precision + Speed Discipline**.
+
+## Current state
+
+VenomGPT already has:
+
+* working screenshot submission
+* working visual task detection
+* working visual analysis
+* working screenshot-to-report behavior
+* working text/file/command baseline
+
+So do NOT spend this pass re-proving screenshot analysis.
+
+That is already done.
+
+## The actual remaining problem
+
+The current system is still weak at this:
+
+**turning screenshot understanding into fast, precise, code-oriented inspection targeting**
+
+The last attempt failed in two ways:
+
+1. It did not show strong evidence that visual findings materially improved file targeting.
+2. It was too slow and too broad, reading too many files and behaving like a general report workflow.
+
+That is the problem to fix.
+
+## Job
+
+Implement a bounded correction pass for:
+
+**fast, precise screenshot-to-code targeting**
+
+Do not stop at analysis.
+
+Make the code changes.
+
+## Goal
+
+When given a screenshot-driven debugging/inspection task, VenomGPT should:
+
+* extract the most relevant visual clues
+* convert those clues into likely file/component targets
+* inspect a small, relevant set of files
+* explain why those files were chosen
+* stay tightly scoped
+* avoid broad repo wandering
+* avoid defaulting into a long generic report workflow unless the task explicitly asks for a report
+
+## Required outcomes
+
+1. Screenshot-driven tasks must use visual findings to improve file selection in a way that is visible and defensible.
+
+2. The system must inspect fewer, more relevant files.
+   We want precision, not repo fishing.
+
+3. The execution feed/logs must clearly show the bridge behavior, for example:
+
+   * visual terms extracted
+   * target files selected
+   * reasons for selection
+
+4. The system must not default into a long report-generation path when the user is asking for action-oriented inspection or targeting.
+
+5. The system must become materially faster on screenshot-driven inspection tasks by reducing unnecessary file reads and unnecessary planning sprawl.
+
+6. The system must preserve honest uncertainty:
+
+   * screenshot clues are hints
+   * repo inspection confirms or disproves them
+
+## What to inspect and fix
+
+Audit and improve the real code paths that control:
+
+* visual keyword extraction quality
+* file/component targeting precision
+* ranking/scoring based on visual findings
+* inspection candidate limits
+* agent-loop planning behavior for screenshot-driven tasks
+* prompt construction so screenshot tasks do not drift into broad analysis/reporting when not needed
+* execution feed visibility for visual-code bridge behavior
+* default task behavior for screenshot inspection vs screenshot reporting
+
+## Implementation requirements
+
+1. Keep this pass tightly scoped.
+
+2. Do not redesign the whole multimodal system.
+
+3. Do not add new broad multimodal features.
+
+4. Do not add image generation/audio/video.
+
+5. Do not reintroduce transport/intake work that is already solved.
+
+6. Reduce broad file wandering.
+   The system should inspect a small, high-value set of candidates first.
+
+7. Make the visual-code bridge observable.
+   We must be able to see:
+
+   * extracted terms
+   * selected files
+   * reasons
+
+8. If the task is action-oriented, do not let the default behavior collapse into “write a long visual report.”
+
+9. If candidate selection needs a hard cap or stronger ranking discipline, implement it.
+
+10. If planning verbosity is causing wasted time, tighten it.
+
+## Speed requirement
+
+This pass must explicitly improve speed discipline for screenshot-driven targeting tasks.
+
+The current behavior is too slow.
+
+You do NOT need to optimize the whole app.
+But you DO need to reduce wasted work in this path:
+
+* fewer irrelevant inspections
+* less unnecessary planning sprawl
+* faster path from screenshot → candidate files → repo confirmation
+
+## Verification requirements
+
+You must verify with real evidence, not claims.
+
+At minimum, verify all of the following locally:
+
+1. A text-only task still works.
+
+2. A screenshot-report task still works.
+
+3. A screenshot-driven inspection/debugging task now:
+
+   * inspects a smaller set of files
+   * shows clear visual-to-code bridge evidence
+   * does not drift into broad report-style behavior
+   * completes materially faster / with less wasted exploration than before
+
+4. Show the exact evidence:
+
+   * screenshot task used
+   * visual terms extracted
+   * files selected
+   * reasons for selection
+   * files actually inspected
+   * total steps / timing comparison if available
+   * final task result
+
+## Acceptance rule
+
+This correction pass should be accepted only if the new behavior clearly shows:
+
+* visual findings materially influenced file targeting
+* file inspection became tighter and more relevant
+* screenshot-driven action tasks no longer default into slow report-heavy wandering
+
+## Explicitly not this pass
+
+Do not turn this into:
+
+* a new broad phase
+* a report-writing improvement pass
+* a generic speed optimization pass for the entire product
+* more multimodal feature breadth
+* analysis without implementation
+
+## Final response format
+
+1. What was wrong in the previous Phase 07 attempt
+2. What you changed
+3. How visual targeting now works
+4. How speed/scope discipline was improved
+5. Files changed and why
+6. What was verified locally
+7. Timing/step-count evidence
+8. Whether Phase 07A now passes acceptance
+
+Important instruction
+
+Do not stop at analysis.
+Do not give another report-heavy result.
+Fix the screenshot-to-code targeting path and verify it with real evidence.

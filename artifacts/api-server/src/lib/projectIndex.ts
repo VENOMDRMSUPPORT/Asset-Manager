@@ -394,13 +394,23 @@ export function selectVisualDebugFiles(
 
 // ─── Visual keyword extraction ────────────────────────────────────────────────
 //
-// Parses the vision model's analysis text to extract file-selection signals:
-//   • CamelCase words → likely component names (e.g. TaskPanel → task-panel)
-//   • Known UI region terms mentioned anywhere in the analysis
-//   • Quoted file references (e.g. `task-panel.tsx`)
+// Two-tier extraction to separate high-confidence component names from
+// generic UI region terms.  The distinction is critical for precision scoring:
 //
-// These terms are used by selectVisualAwareFiles() to score files against both
-// the user's original prompt AND the richer vocabulary in the vision output.
+//   HIGH-CONFIDENCE (extractComponentNames):
+//     • CamelCase words → very likely React component names
+//       e.g. "TaskPanel" → "task-panel" + parts "task", "panel"
+//     • Quoted filenames  (e.g. `task-panel.tsx`)
+//     → Used with high weight (exact=8, partial=3) in file scoring.
+//
+//   LOW-CONFIDENCE (UI_REGION_TERMS scan):
+//     • Generic layout words that appear in the analysis text
+//       e.g. "sidebar", "panel", "header" — match many unrelated files
+//     → Used with low weight (+1) — provides signal but doesn't dominate.
+//
+// The previous flat-weight approach (+4 for ALL terms) caused every file in a
+// "panels/" directory to score near-identically regardless of whether the
+// vision model actually named that component.
 
 // UI element names that commonly appear in frontend code paths / component names
 const UI_REGION_TERMS = [
@@ -424,37 +434,90 @@ function extractTerms(text: string): string[] {
 }
 
 /**
- * Extract file-selection keywords from a vision model's analysis output.
- * Returns a deduplicated list of lowercase terms suitable for path matching.
+ * Extract HIGH-CONFIDENCE component name terms from a vision model's analysis.
+ * Only includes CamelCase component names and quoted file references.
+ * Does NOT include generic region terms (panel, header, etc.) which are too broad.
+ *
+ * Each returned entry is { kebab, parts } where:
+ *   kebab = full kebab-case name (e.g. "task-panel")
+ *   parts = individual sub-words (e.g. ["task", "panel"])
  */
-export function extractVisualKeywords(analysisText: string): string[] {
-  const keywords = new Set<string>();
-  const lower = analysisText.toLowerCase();
+export interface ComponentNameEntry {
+  kebab:    string;
+  parts:    string[];
+  mentions: number; // how many times this CamelCase word appeared in the analysis
+}
 
-  // 1. CamelCase words — likely React component names — convert to kebab-case
-  //    e.g. "TaskPanel" → ["task-panel", "task", "panel"]
-  //    e.g. "FileExplorer" → ["file-explorer", "file", "explorer"]
+export function extractComponentNames(analysisText: string): ComponentNameEntry[] {
+  const mentionCounts = new Map<string, number>(); // kebab → count
+
+  // Count all CamelCase occurrences (including duplicates)
   const camelWords = analysisText.match(/\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b/g) ?? [];
   for (const word of camelWords) {
     const kebab = word
       .replace(/([A-Z])/g, (m, c, i) => (i > 0 ? "-" : "") + c.toLowerCase())
       .replace(/^-/, "");
-    keywords.add(kebab);
-    kebab.split("-").forEach((part) => { if (part.length > 3 && !STOP_WORDS.has(part)) keywords.add(part); });
+    mentionCounts.set(kebab, (mentionCounts.get(kebab) ?? 0) + 1);
   }
 
-  // 2. Known UI region terms mentioned anywhere in the analysis text
-  for (const term of UI_REGION_TERMS) {
-    if (lower.includes(term)) keywords.add(term);
+  const names: ComponentNameEntry[] = [];
+
+  for (const [kebab, mentions] of mentionCounts) {
+    const parts = kebab.split("-").filter((p) => p.length > 3 && !STOP_WORDS.has(p));
+    names.push({ kebab, parts, mentions });
   }
 
-  // 3. Quoted file paths or component filenames  (e.g. `task-panel.tsx`, "styles.css")
+  // Quoted file paths/names (e.g. `task-panel.tsx`, "styles.css") — high confidence
   const quotedPaths = analysisText.match(/[`'"]([\w][\w\-./]+\.[a-z]{2,5})[`'"]/g) ?? [];
   for (const quoted of quotedPaths) {
-    const inner  = quoted.slice(1, -1);
-    const base   = inner.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
-    const kebab  = base.replace(/_/g, "-").toLowerCase();
-    if (kebab.length > 2 && !STOP_WORDS.has(kebab)) keywords.add(kebab);
+    const inner = quoted.slice(1, -1);
+    const base  = inner.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+    const kebab = base.replace(/_/g, "-").toLowerCase();
+    if (kebab.length > 2 && !STOP_WORDS.has(kebab)) {
+      // If already captured from CamelCase, boost its mentions count
+      const existing = names.find((n) => n.kebab === kebab);
+      if (existing) { existing.mentions += 2; }
+      else { names.push({ kebab, parts: [], mentions: 2 }); }
+    }
+  }
+
+  // Bare file references without quotes (e.g. "task-panel.tsx" in prose) — medium confidence
+  // Pattern: word-with-hyphens.known-ext — avoids matching generic words like "fix.css"
+  const bareFiles = analysisText.match(
+    /\b([a-z][\w\-]+\.(tsx?|jsx?|css|scss|less|html|vue|svelte))\b/g
+  ) ?? [];
+  for (const bare of bareFiles) {
+    const base  = bare.replace(/\.[^.]+$/, "");
+    const kebab = base.replace(/_/g, "-").toLowerCase();
+    if (kebab.length > 3 && !STOP_WORDS.has(kebab)) {
+      const existing = names.find((n) => n.kebab === kebab);
+      if (existing) { existing.mentions += 1; }
+      else { names.push({ kebab, parts: [], mentions: 1 }); }
+    }
+  }
+
+  // Sort by mention count descending so most-mentioned components rank first
+  return names.sort((a, b) => b.mentions - a.mentions);
+}
+
+/**
+ * Extract file-selection keywords from a vision model's analysis output.
+ * Returns a flat deduplicated list (CamelCase + region terms).
+ * Use extractComponentNames() for high-precision scoring.
+ */
+export function extractVisualKeywords(analysisText: string): string[] {
+  const keywords = new Set<string>();
+  const lower    = analysisText.toLowerCase();
+
+  // High-confidence component names
+  for (const { kebab, parts } of extractComponentNames(analysisText)) {
+    keywords.add(kebab);
+    parts.forEach((p) => keywords.add(p));
+  }
+
+  // Low-confidence: generic UI region terms present in analysis
+  for (const term of UI_REGION_TERMS) {
+    if (lower.includes(term)) keywords.add(term);
   }
 
   return [...keywords].filter((k) => k.length > 2 && !STOP_WORDS.has(k));
@@ -462,42 +525,71 @@ export function extractVisualKeywords(analysisText: string): string[] {
 
 // ─── Visual-aware file selector ───────────────────────────────────────────────
 //
-// Augments the existing visual-debug file scorer with keywords extracted from
-// the vision model's analysis output.  Each returned file includes a `reasons`
-// array so the caller can surface a transparent "why this file" explanation to
-// the agent — turning file selection from a silent heuristic into something the
-// agent (and the user) can actually reason about.
+// Two-tier visual scoring that separates high-signal component-name matches
+// from low-signal generic region-term matches.
+//
+// SCORING TIERS:
+//   Exact filename = component kebab name  →  +8  (strongest: vision named this exact component)
+//   Partial path   = component kebab/part  →  +3  (good: part of a named component matches path)
+//   Generic region term in path            →  +1  (weak: "panel" in panels/ dir — lots of files)
+//   Prompt keyword in path                 →  +3  (user's own words — solid signal)
+//   Style file (.css/.scss/…)             →  +5  (always relevant for visual fixes)
+//   CSS module                             →  +4
+//   Component file (.tsx/.jsx/…)          →  +2
+//   Path-pattern signal (layout/, ui/…)   →  +2  (cap 1 match)
+//   Recency <1h/8h/48h                    →  +3/2/1
+//   Shallow (depth≤2)                     →  +1
+//
+// Minimum score to surface in bridge: 5 (raised from 3 to filter noise).
+// Default max candidates: 5 (reduced from 10 to enforce precision).
 
 export interface ScoredFile {
   file:    FileMetadata;
-  reasons: string[];   // e.g. ["visual: task-panel", "prompt: panel", "style file"]
+  reasons: string[];   // e.g. ["visual[exact]: task-panel", "prompt: panel", "style file"]
   score:   number;
 }
 
+const MIN_BRIDGE_SCORE  = 5;   // was MIN_VISUAL_SCORE=3 — higher threshold reduces noise
+const MAX_BRIDGE_FILES  = 5;   // default candidate count for bridge selection
+
 /**
- * Select files relevant to a visual task, scored by BOTH the user prompt AND
- * the vision model's analysis output.  Returns up to `maxFiles` results with
- * per-file reasoning.
- *
- * Use this instead of selectVisualDebugFiles() for fix/improve/analyze intents.
+ * Select files relevant to a visual task using two-tier visual scoring.
+ * High-confidence component names score much higher than generic region terms.
+ * Returns up to `maxFiles` results with per-file reasoning.
  */
 export function selectVisualAwareFiles(
   index:          ProjectIndex,
   userPrompt:     string,
   visualAnalysis: string,
-  maxFiles:       number = 10
+  maxFiles:       number = MAX_BRIDGE_FILES
 ): ScoredFile[] {
-  const promptTerms = extractTerms(userPrompt);
-  const visualTerms = extractVisualKeywords(visualAnalysis);
+  const promptTerms    = extractTerms(userPrompt);
+  const componentNames = extractComponentNames(visualAnalysis);
+
+  // Build a set of ALL terms already covered by component names (full kebabs + parts).
+  // Excludes those terms from the low-signal region scan to prevent double-counting.
+  // e.g. if "file-explorer" is a component name, "explorer" (its part) should not
+  // also independently add score from the generic region-term scan.
+  const componentTermsCovered = new Set<string>();
+  for (const { kebab, parts } of componentNames) {
+    componentTermsCovered.add(kebab);
+    parts.forEach((p) => componentTermsCovered.add(p));
+  }
+
+  // Low-signal region terms: only those NOT already covered by component name/parts
+  const regionTerms = UI_REGION_TERMS.filter(
+    (t) => visualAnalysis.toLowerCase().includes(t) && !componentTermsCovered.has(t)
+  );
 
   const results: ScoredFile[] = [];
 
   for (const file of index.files) {
     const filePath = file.path.toLowerCase().replace(/\\/g, "/");
+    const filename  = path.basename(filePath, path.extname(filePath));
     let score = 0;
     const reasons: string[] = [];
 
-    // File-type signals (same weights as selectVisualDebugFiles)
+    // ── File-type signals ──────────────────────────────────────────────────
     if (VISUAL_STYLE_EXTS.has(file.ext)) {
       score += 5; reasons.push("style file");
     } else if (filePath.includes(".module.")) {
@@ -506,12 +598,12 @@ export function selectVisualAwareFiles(
       score += 2; reasons.push("component file");
     }
 
-    // Path-pattern signals
+    // ── Path-pattern signals (cap at 1 match) ──────────────────────────────
     for (const signal of VISUAL_PATH_SIGNALS) {
       if (filePath.includes(signal)) { score += 2; break; }
     }
 
-    // Prompt keyword match (weight 3 — original user intent)
+    // ── Prompt keyword match (+3) ─────────────────────────────────────────
     for (const term of promptTerms) {
       if (filePath.includes(term)) {
         score += 3;
@@ -519,27 +611,56 @@ export function selectVisualAwareFiles(
       }
     }
 
-    // Visual analysis keyword match (weight 4 — higher than prompt, because
-    // these terms come from what the screenshot actually showed)
-    for (const term of visualTerms) {
-      if (filePath.includes(term)) {
-        score += 4;
-        if (!reasons.some((r) => r.includes(`"${term}"`))) {
-          reasons.push(`visual: "${term}"`);
+    // ── High-confidence: component name matches ───────────────────────────
+    // Exact filename match = vision named this specific component.
+    // Bonus is weighted by mention count: more mentions = stronger signal.
+    //   1 mention  → exact +7  (was mentioned once — may be incidental)
+    //   2 mentions → exact +9  (mentioned twice — likely the focus)
+    //   3+ mentions→ exact +11 (mentioned 3+ times — clearly the defect target)
+    //
+    // This ensures a component mentioned 3× in defect sections scores much
+    // higher than one mentioned once in passing as "working fine".
+    for (const { kebab, parts, mentions } of componentNames) {
+      const mentionBonus = Math.min(4, (mentions - 1) * 2); // 0, 2, 4 for 1, 2, 3+ mentions
+      if (filename === kebab) {
+        const exactBonus = 7 + mentionBonus;
+        score += exactBonus;
+        reasons.push(`visual[exact×${mentions}]: "${kebab}"`);
+      } else if (filePath.includes(kebab)) {
+        // Full kebab in path (but not exact filename) — e.g. "task-panel" in dir name
+        score += 3;
+        reasons.push(`visual[path]: "${kebab}"`);
+      } else {
+        // Check individual parts (low-signal, capped contribution)
+        for (const part of parts) {
+          if (filename === part) {
+            score += 3; reasons.push(`visual[part-exact]: "${part}"`); break;
+          } else if (filePath.includes(part)) {
+            score += 1; // minimal — part appears somewhere in path
+            break;
+          }
         }
       }
     }
 
-    // Recency (visually-broken code is often recently touched)
+    // ── Low-confidence: generic region terms (+1 each, cap 3 total) ───────
+    let regionBonus = 0;
+    for (const term of regionTerms) {
+      if (regionBonus >= 3) break;
+      if (filePath.includes(term)) { regionBonus += 1; }
+    }
+    score += regionBonus;
+
+    // ── Recency ───────────────────────────────────────────────────────────
     const ageHours = (Date.now() - file.mtimeMs) / 3_600_000;
     if      (ageHours < 1)  score += 3;
     else if (ageHours < 8)  score += 2;
     else if (ageHours < 48) score += 1;
 
-    // Shallow files (global styles, main layout files) preferred
+    // ── Shallow files (global styles, main layout) ─────────────────────────
     if (file.depth <= 2) score += 1;
 
-    if (score >= MIN_VISUAL_SCORE) {
+    if (score >= MIN_BRIDGE_SCORE) {
       results.push({ file, reasons, score });
     }
   }
