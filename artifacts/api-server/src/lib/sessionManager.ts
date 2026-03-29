@@ -10,7 +10,11 @@ export type AgentEventType =
   | "command"
   | "command_output"
   | "error"
-  | "done";
+  | "done"
+  /** Emitted once at task start with the resolved execution profile (category, caps). */
+  | "route"
+  /** Emitted after the planning phase with the structured execution plan. */
+  | "plan";
 
 export interface AgentEvent {
   type: AgentEventType;

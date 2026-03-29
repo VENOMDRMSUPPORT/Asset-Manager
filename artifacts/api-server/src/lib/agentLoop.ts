@@ -30,6 +30,13 @@ import {
 import { getSettings } from "./settingsStore.js";
 import { logger } from "./logger.js";
 
+// ─── Orchestrator imports ──────────────────────────────────────────────────────
+import { routeTask }                         from "./orchestrator/taskRouter.js";
+import { runPlanningPhase, formatPlanForContext } from "./orchestrator/planner.js";
+import { gateAction, updateStateAfterAction } from "./orchestrator/actionRouter.js";
+import { createRunState }                    from "./orchestrator/types.js";
+import type { RunState }                     from "./orchestrator/types.js";
+
 // ─── Event helpers ────────────────────────────────────────────────────────────
 
 function emit(taskId: string, type: Parameters<typeof addEvent>[1], message: string, data?: Record<string, unknown>): void {
@@ -815,6 +822,23 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
         return;
       }
 
+      // ── Task routing ─────────────────────────────────────────────────────
+      // Classifies the task and selects an execution profile (step budget, file
+      // caps, verification requirements, planning phase flag).
+      const profile = routeTask(prompt, taskMeta.isVisual, taskMeta.isVisual ? visualIntent : undefined);
+      emit(taskId, "route", `${profile.category}: ${profile.description}`, {
+        category:       profile.category,
+        maxSteps:       profile.maxSteps,
+        maxFileReads:   profile.maxFileReads,
+        maxFileWrites:  profile.maxFileWrites,
+        requiresVerify: profile.requiresVerify,
+        planningPhase:  profile.planningPhase,
+      });
+      logger.info(
+        { taskId, category: profile.category, maxSteps: profile.maxSteps, maxFileReads: profile.maxFileReads },
+        "[Orchestrator] Task routed"
+      );
+
       // ── Conversational bypass ─────────────────────────────────────────────
       if (isConversationalPrompt(prompt)) {
         logger.info({ taskId, prompt }, "Conversational prompt — direct response path");
@@ -884,12 +908,12 @@ export async function runAgentTask(prompt: string, images: string[] = []): Promi
       } else {
         emit(taskId, "status", "Analysing workspace…");
         try {
-          // Raw tree (root level only for large projects — kept for structure overview)
-          const entries = await listDirectory("");
+          // Run raw tree scan and project indexing in parallel to cut latency
+          const [entries, index] = await Promise.all([
+            listDirectory(""),
+            getProjectIndex(wsRoot),
+          ]);
           workspaceSnapshot = formatDirectoryTree(entries);
-
-          // Project index with relevance scoring
-          const index = await getProjectIndex(wsRoot);
           projectIndex = index;  // exposed for visual debug file selection below
           const relevantFiles = selectRelevantFiles(index, prompt, 20);
           projectIntelligence = buildProjectSummary(index, relevantFiles);
@@ -1192,36 +1216,66 @@ Do not read files speculatively. Do not read files to "understand the codebase".
         { role: "user", content: userPromptParts.join("\n\n") },
       ];
 
-      // ── Execution tracking ────────────────────────────────────────────────
-      // These track what actually happened for evidence-based completion gates.
-      const filesWritten  = new Set<string>();
-      const commandsActuallyRun: string[] = [];
-      let   lastActionFailed  = false; // did the immediately preceding action fail?
-      let   consecutiveRepairs = 0;    // how many consecutive failures in a row?
+      // ── Planning phase (code_edit tasks only) ────────────────────────────
+      // Before the main loop, ask the model for a structured JSON plan.
+      // This makes the agent's intentions explicit and gives it a clear roadmap.
+      // Failure is always silent — the loop continues without a plan.
+      if (profile.planningPhase) {
+        emit(taskId, "status", "Planning…");
+        // Build a compact planner context from the full user context
+        const plannerContext = [
+          projectIntelligence ? `Project intelligence:\n${projectIntelligence}` : "",
+          workspaceSnapshot   ? `File structure:\n${workspaceSnapshot}` : "",
+          `Task: ${prompt}`,
+        ].filter(Boolean).join("\n\n");
 
-      const MAX_STEPS               = getSettings().maxSteps;
-      const MAX_CONSECUTIVE_REPAIRS = 3; // give up the repair loop after this many
-      let step = 0;
-      let consecutiveParseFailures = 0;
+        const plan = await runPlanningPhase(model, plannerContext);
+        if (plan) {
+          const planText = formatPlanForContext(plan);
+          emit(taskId, "plan", planText, {
+            goal:            plan.goal,
+            approach:        plan.approach,
+            filesToRead:     plan.filesToRead,
+            expectedChanges: plan.expectedChanges,
+            verification:    plan.verification,
+          });
+          logger.info(
+            { taskId, goal: plan.goal, filesToRead: plan.filesToRead, expectedChanges: plan.expectedChanges },
+            "[Orchestrator] Planning phase complete"
+          );
+          // Inject the plan into the agent context as a pre-loop user message
+          messages.push({ role: "user",      content: `[ORCHESTRATOR] Here is the execution plan produced before the loop:\n\n${planText}` });
+          messages.push({ role: "assistant", content: `{"action":"think","thought":"[PLANNING] I have reviewed the execution plan. Goal: ${plan.goal}. I will read ${plan.filesToRead.join(", ") || "the relevant files"}, make the expected changes, and verify with: ${plan.verification}."}` });
+        } else {
+          emit(taskId, "status", "Planning phase skipped (no structured plan returned).");
+          logger.debug({ taskId }, "[Orchestrator] Planning phase produced no plan — continuing without one");
+        }
+      }
+
+      // ── Run state ─────────────────────────────────────────────────────────
+      // Structured execution state. Replaces scattered local variables and
+      // provides the action router with the information it needs to gate actions.
+      const runState: RunState = createRunState(profile, getSettings().maxSteps);
+      const MAX_CONSECUTIVE_REPAIRS = 3;
       let lastSummary = "Agent reached maximum steps without completing the task.";
       let completion: TaskCompletion | undefined;
 
       // ── Agent loop ────────────────────────────────────────────────────────
-      while (step < MAX_STEPS) {
+      while (runState.step < runState.maxSteps) {
         if (isTaskCancelled(taskId)) {
-          logger.info({ taskId, step }, "Task cancelled by user");
+          logger.info({ taskId, step: runState.step }, "Task cancelled by user");
           emit(taskId, "status", "Cancelled by user.");
           updateTaskStatus(taskId, "error", "Cancelled by user.", undefined, {
             title: "Task cancelled",
             detail: "The task was stopped by the user.",
-            step: `step_${step}`,
+            step: `step_${runState.step}`,
             category: "cancelled",
           });
           broadcastTaskUpdate(task);
           return;
         }
 
-        step++;
+        runState.step++;
 
         // ── Model call ──────────────────────────────────────────────────────
         let responseText = "";
@@ -1241,24 +1295,24 @@ Do not read files speculatively. Do not read files to "understand the codebase".
             (chunk) => { responseText += chunk; },
             agentOpts
           );
-          logger.debug({ taskId, step, responseLength: responseText.length }, "Model response received");
+          logger.debug({ taskId, step: runState.step, responseLength: responseText.length }, "Model response received");
         } catch (err) {
           if (isTaskCancelled(taskId)) {
             emit(taskId, "status", "Cancelled during model call.");
             updateTaskStatus(taskId, "error", "Cancelled by user", undefined, {
               title: "Task cancelled",
               detail: "Stopped during a model call.",
-              step: `step_${step}`,
+              step: `step_${runState.step}`,
               category: "cancelled",
             });
             broadcastTaskUpdate(task);
             return;
           }
           const isModelError = err instanceof ModelError;
-          failTask(taskId, task, `Model error at step ${step}: ${isModelError ? err.message : String(err)}`, {
+          failTask(taskId, task, `Model error at step ${runState.step}: ${isModelError ? err.message : String(err)}`, {
             title: isModelError ? err.message : "AI model call failed",
             detail: isModelError ? `Category: ${err.category}\nTechnical: ${err.technical}` : String(err),
-            step: `step_${step}_model_call`,
+            step: `step_${runState.step}_model_call`,
             category: "model",
           });
           return;
@@ -1270,23 +1324,23 @@ Do not read files speculatively. Do not read files to "understand the codebase".
         const normalized = normalizeModelResponse(responseText);
 
         if (!normalized.ok) {
-          consecutiveParseFailures++;
+          runState.consecutiveParseFailures++;
           const reason: NormalizeFailureReason = normalized.reason;
           const detail = normalized.detail;
 
           logger.warn(
-            { taskId, step, consecutiveParseFailures, reason, responsePreview: responseText.slice(0, 200) },
+            { taskId, step: runState.step, consecutiveParseFailures: runState.consecutiveParseFailures, reason, responsePreview: responseText.slice(0, 200) },
             `Normalize failed [${reason}]`
           );
 
-          if (consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
+          if (runState.consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
             // Final failure — surface as a visible error
             const failMsg = `Model returned ${MAX_CONSECUTIVE_PARSE_FAILURES} unparseable responses in a row.\nLast failure: [${reason}] ${detail.slice(0, 300)}`;
             emit(taskId, "error", failMsg);
             failTask(taskId, task, `Model returned ${MAX_CONSECUTIVE_PARSE_FAILURES} unparseable responses in a row`, {
               title: `Model failed to produce valid JSON ${MAX_CONSECUTIVE_PARSE_FAILURES} times`,
               detail: `Last failure reason: ${reason}\n${detail}`,
-              step: `step_${step}_parse`,
+              step: `step_${runState.step}_parse`,
               category: "orchestration",
             });
             return;
@@ -1294,33 +1348,48 @@ Do not read files speculatively. Do not read files to "understand the codebase".
 
           // Early failure (attempt 1 or 2) — emit a quiet status, not an error.
           // Most models recover on the first retry; showing a red error card is noisy.
-          emit(taskId, "status", `Retrying response format (attempt ${consecutiveParseFailures})…`);
+          emit(taskId, "status", `Retrying response format (attempt ${runState.consecutiveParseFailures})…`);
 
           const retryMsg = buildRetryInstruction(reason, responseText.slice(0, 300));
           messages.push({ role: "user", content: retryMsg });
           continue;
         }
 
-        consecutiveParseFailures = 0;
+        runState.consecutiveParseFailures = 0;
 
         const { action, method, warning } = normalized;
         // Only log non-trivial normalization paths
         if (method !== "direct_parse" && method !== "fence_stripped") {
-          logger.debug({ taskId, step, method, warning }, `Response normalized via ${method}`);
+          logger.debug({ taskId, step: runState.step, method, warning }, `Response normalized via ${method}`);
         }
         if (warning && method !== "json_repaired") {
           // json_repaired is expected and not concerning — skip the warn log
-          logger.warn({ taskId, step, method, warning }, "Normalization warning");
+          logger.warn({ taskId, step: runState.step, method, warning }, "Normalization warning");
         }
 
         const actionType = String(action["action"] ?? "");
 
+        // ── Action router gate ──────────────────────────────────────────────
+        // Enforces profile caps (read cap, redundant read, write cap, verify gate)
+        // BEFORE the action executes. A blocked action injects a corrective message
+        // and continues the loop without counting as a real step output.
+        const gate = gateAction(action, runState);
+        if (!gate.allowed) {
+          logger.info(
+            { taskId, step: runState.step, actionType, reason: gate.reason },
+            `[Orchestrator] Action router blocked ${actionType} (${gate.reason})`
+          );
+          emit(taskId, "status", `[Orchestrator] ${gate.reason.replace(/_/g, " ")}`);
+          messages.push({ role: "user", content: gate.forcedMessage });
+          continue;
+        }
+
         // ── Emit stage label before executing ──────────────────────────────
-        emitStage(taskId, step, MAX_STEPS, actionType, action, lastActionFailed);
+        emitStage(taskId, runState.step, runState.maxSteps, actionType, action, runState.lastActionFailed);
 
         // ── Done action ─────────────────────────────────────────────────────
         if (actionType === "done") {
-          const summary     = String(action["summary"] ?? "Task complete.");
+          const summary      = String(action["summary"] ?? "Task complete.");
           const changedFiles = Array.isArray(action["changed_files"])
             ? (action["changed_files"] as unknown[]).map(String)
             : [];
@@ -1334,9 +1403,9 @@ Do not read files speculatively. Do not read files to "understand the codebase".
 
           // ── Evidence cross-check ────────────────────────────────────────
           // Compare what the agent CLAIMS it changed vs. what was ACTUALLY written.
-          // Log a warning if there's a discrepancy but don't block the completion.
-          const unclaimedWrites = [...filesWritten].filter(f => !changedFiles.includes(f));
-          const phantomClaims   = changedFiles.filter(f => filesWritten.size > 0 && !filesWritten.has(f));
+          // Use runState.filesWritten as ground truth.
+          const unclaimedWrites = [...runState.filesWritten].filter(f => !changedFiles.includes(f));
+          const phantomClaims   = changedFiles.filter(f => runState.filesWritten.size > 0 && !runState.filesWritten.has(f));
 
           if (unclaimedWrites.length > 0) {
             logger.warn({ taskId, unclaimedWrites }, "Agent did not list all written files in done.changed_files");
@@ -1348,8 +1417,8 @@ Do not read files speculatively. Do not read files to "understand the codebase".
 
           // Use actual tracked data to augment claimed lists
           const mergedChangedFiles = [...new Set([...changedFiles, ...unclaimedWrites])];
-          const mergedCommandsRun  = commandsActuallyRun.length > 0
-            ? [...new Set([...commandsRun, ...commandsActuallyRun])]
+          const mergedCommandsRun  = runState.commandsRun.length > 0
+            ? [...new Set([...commandsRun, ...runState.commandsRun])]
             : commandsRun;
 
           completion = {
@@ -1361,19 +1430,24 @@ Do not read files speculatively. Do not read files to "understand the codebase".
           };
           lastSummary = summary;
 
-          logger.info({ taskId, step, finalStatus, mergedChangedFiles, mergedCommandsRun }, "Task completed");
+          logger.info(
+            { taskId, step: runState.step, finalStatus, mergedChangedFiles, mergedCommandsRun,
+              filesRead: [...runState.filesRead].length, verificationsDone: runState.verificationsDone },
+            "Task completed"
+          );
           emit(taskId, "done", summary, {
             changed_files: mergedChangedFiles,
             commands_run:  mergedCommandsRun,
             final_status:  finalStatus,
             remaining,
           });
+          updateStateAfterAction(runState, action, true);
           break;
         }
 
         // ── Execute action ──────────────────────────────────────────────────
         const signal = getTaskSignal(taskId);
-        logger.debug({ taskId, step, actionType }, "Executing action");
+        logger.debug({ taskId, step: runState.step, actionType }, "Executing action");
         const result = await executeAction(action, taskId, signal);
 
         if (isTaskCancelled(taskId)) {
@@ -1381,43 +1455,36 @@ Do not read files speculatively. Do not read files to "understand the codebase".
           updateTaskStatus(taskId, "error", "Cancelled by user", undefined, {
             title: "Task cancelled",
             detail: "Stopped after an action completed.",
-            step: `step_${step}_${actionType}`,
+            step: `step_${runState.step}_${actionType}`,
             category: "cancelled",
           });
           broadcastTaskUpdate(task);
           return;
         }
 
-        // ── Update execution tracking ───────────────────────────────────────
+        // ── Update run state (orchestrator tracking) ────────────────────────
+        // Captures what happened: reads, writes, commands, phase transitions.
+        const prevFailed = runState.lastActionFailed;
+        updateStateAfterAction(runState, action, result.success);
+
+        // ── Project index invalidation on write ─────────────────────────────
         if (actionType === "write_file" && result.success) {
-          filesWritten.add(String(action["path"] ?? ""));
-          // After a successful write, invalidate the project index so the next
-          // task sees the updated file metadata (recency, size).
           invalidateProjectIndex();
         }
 
-        if (actionType === "run_command") {
-          commandsActuallyRun.push(String(action["command"] ?? ""));
-        }
-
-        // ── Repair tracking ─────────────────────────────────────────────────
-        const prevFailed = lastActionFailed;
-        lastActionFailed = !result.success;
-
+        // ── Repair limit nudge ──────────────────────────────────────────────
         if (!result.success) {
-          consecutiveRepairs++;
-          if (consecutiveRepairs >= MAX_CONSECUTIVE_REPAIRS) {
-            // Force the agent toward a graceful partial completion rather than
-            // continuing to spin on a broken repair loop.
-            logger.warn({ taskId, step, consecutiveRepairs }, "Too many consecutive failures — injecting repair-limit nudge");
+          if (runState.consecutiveFailures >= MAX_CONSECUTIVE_REPAIRS) {
+            logger.warn(
+              { taskId, step: runState.step, consecutiveFailures: runState.consecutiveFailures },
+              "Too many consecutive failures — injecting repair-limit nudge"
+            );
             messages.push({
               role: "user",
-              content: `ERROR: ${result.output}\n\nThis is the ${consecutiveRepairs}rd consecutive failure. You are close to the repair limit. If this cannot be fixed in one more attempt, call done with final_status "partial" and explain exactly what failed in the remaining field.`,
+              content: `ERROR: ${result.output}\n\nThis is the ${runState.consecutiveFailures}th consecutive failure. You are close to the repair limit. If this cannot be fixed in one more attempt, call done with final_status "partial" and explain exactly what failed in the remaining field.`,
             });
             continue;
           }
-        } else {
-          consecutiveRepairs = 0;
         }
 
         // ── Build tool result message for the model ─────────────────────────
@@ -1430,7 +1497,7 @@ Do not read files speculatively. Do not read files to "understand the codebase".
           }
         } else {
           const repairHint = prevFailed
-            ? `\nThis is failure #${consecutiveRepairs}. Think [REPAIRING] about what specifically went wrong and try a different approach.`
+            ? `\nThis is failure #${runState.consecutiveFailures}. Think [REPAIRING] about what specifically went wrong and try a different approach.`
             : `\nAnalyse this error carefully. Use think [REPAIRING] to diagnose the root cause before retrying.`;
           resultMsg = `ERROR: ${result.output}${repairHint}`;
         }
@@ -1439,16 +1506,16 @@ Do not read files speculatively. Do not read files to "understand the codebase".
       }
 
       // ── Step limit reached ────────────────────────────────────────────────
-      if (step >= MAX_STEPS && !completion) {
-        logger.warn({ taskId, step }, "Reached maximum step limit");
-        emit(taskId, "status", `Reached step limit (${MAX_STEPS}). Stopping.`);
-        lastSummary = `Reached step limit (${MAX_STEPS}). Task may be partially complete.`;
+      if (runState.step >= runState.maxSteps && !completion) {
+        logger.warn({ taskId, step: runState.step, maxSteps: runState.maxSteps }, "Reached maximum step limit");
+        emit(taskId, "status", `Reached step limit (${runState.maxSteps}). Stopping.`);
+        lastSummary = `Reached step limit (${runState.maxSteps}). Task may be partially complete.`;
         // Attach actual tracked data to the partial completion
-        if (filesWritten.size > 0 || commandsActuallyRun.length > 0) {
+        if (runState.filesWritten.size > 0 || runState.commandsRun.length > 0) {
           completion = {
             summary: lastSummary,
-            changed_files: [...filesWritten],
-            commands_run:  commandsActuallyRun,
+            changed_files: [...runState.filesWritten],
+            commands_run:  runState.commandsRun,
             final_status:  "partial",
             remaining:     "Hit the step limit before task was verified complete.",
           };

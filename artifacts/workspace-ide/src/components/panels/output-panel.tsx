@@ -4,7 +4,7 @@ import {
   Terminal, Activity, CheckCircle2, AlertCircle, PlayCircle,
   Eye, FileEdit, Settings, Trash2, FileCheck, GitBranch,
   ShieldAlert, Zap, Copy, Check, ChevronRight, Search,
-  Wrench, Loader2, ChevronDown,
+  Wrench, Loader2, ChevronDown, MapPin, ListChecks,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -360,6 +360,74 @@ function AgentLogItem({ log }: { log: AgentLogEvent }) {
         <AlertCircle className="w-3 h-3 shrink-0 text-red-400" />
         <span className="text-red-300 truncate flex-1">{log.message}</span>
         <Timestamp ts={log.timestamp} />
+      </div>
+    );
+  }
+
+  // Route event: compact informational tag showing what execution profile was selected
+  if (log.type === 'route') {
+    const category = log.data?.category as string | undefined;
+    const maxSteps = log.data?.maxSteps as number | undefined;
+    const maxReads = log.data?.maxFileReads as number | undefined;
+    return (
+      <div className="flex items-center gap-2 px-2.5 py-1 text-xs text-blue-300/60 bg-blue-400/5 border border-blue-400/10 rounded">
+        <MapPin className="w-3 h-3 shrink-0 text-blue-400/50" />
+        <span className="font-mono text-blue-300/70">{category ?? 'routed'}</span>
+        {maxSteps != null && (
+          <span className="text-blue-400/40 ml-auto">≤{maxSteps} steps{maxReads != null ? ` · ≤${maxReads} reads` : ''}</span>
+        )}
+        <Timestamp ts={log.timestamp} />
+      </div>
+    );
+  }
+
+  // Plan event: expandable block showing the structured execution plan
+  if (log.type === 'plan') {
+    const goal     = log.data?.goal     as string | undefined;
+    const approach = log.data?.approach as string | undefined;
+    const files    = log.data?.filesToRead  as string[] | undefined;
+    const changes  = log.data?.expectedChanges as string[] | undefined;
+    const verify   = log.data?.verification as string | undefined;
+    return (
+      <div className="rounded border border-indigo-400/20 bg-indigo-400/5 text-xs overflow-hidden">
+        <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-indigo-400/10">
+          <ListChecks className="w-3 h-3 shrink-0 text-indigo-400" />
+          <span className="font-semibold text-indigo-300 text-[11px] uppercase tracking-wider">Execution Plan</span>
+          <Timestamp ts={log.timestamp} />
+        </div>
+        <div className="px-3 py-2 space-y-1.5">
+          {goal && (
+            <div>
+              <span className="text-indigo-400/60 text-[10px] uppercase tracking-wider">Goal </span>
+              <span className="text-indigo-200/80">{goal}</span>
+            </div>
+          )}
+          {approach && (
+            <div className="text-indigo-100/50 leading-relaxed">{approach}</div>
+          )}
+          {files && files.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              <span className="text-indigo-400/60 text-[10px] uppercase tracking-wider mr-1">Read</span>
+              {files.map((f, i) => (
+                <span key={i} className="font-mono bg-indigo-400/10 border border-indigo-400/15 px-1.5 py-0.5 rounded text-indigo-200/60">{f}</span>
+              ))}
+            </div>
+          )}
+          {changes && changes.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              <span className="text-indigo-400/60 text-[10px] uppercase tracking-wider mr-1">Change</span>
+              {changes.map((f, i) => (
+                <span key={i} className="font-mono bg-emerald-400/8 border border-emerald-400/12 px-1.5 py-0.5 rounded text-emerald-300/60">{f}</span>
+              ))}
+            </div>
+          )}
+          {verify && (
+            <div>
+              <span className="text-indigo-400/60 text-[10px] uppercase tracking-wider">Verify </span>
+              <span className="font-mono text-cyan-300/60">{verify}</span>
+            </div>
+          )}
+        </div>
       </div>
     );
   }

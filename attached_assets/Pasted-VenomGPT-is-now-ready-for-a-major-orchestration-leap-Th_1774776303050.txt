@@ -1,0 +1,219 @@
+VenomGPT is now ready for a major orchestration leap.
+
+This is NOT a small correction pass.
+This is NOT a UI phase.
+This is NOT a minor optimization pass.
+
+This is a large, bounded **Orchestration Architecture Pass**.
+
+## Current state
+
+VenomGPT already has:
+
+* a working local execution-oriented coding assistant baseline
+* validated file and command execution
+* multi-step task handling
+* provider-aware routing
+* operator-facing task lifecycle stability
+* screenshot analysis/report capability
+* improved screenshot-to-code targeting behavior
+* task persistence and execution feed
+* a product shape that is already meaningfully workspace-oriented
+
+So the project is no longer blocked on MVP plumbing.
+
+The next real limitation is architectural:
+
+**VenomGPT still relies too heavily on a single linear agent loop.**
+
+That is no longer enough.
+
+## The actual remaining problem
+
+If the product is meant to move materially closer to Replit-grade orchestration, the next leap is not another surface feature.
+
+The next leap is:
+
+* better task decomposition
+* clearer execution roles
+* structured orchestration state
+* better tool/path selection
+* better handling of longer-running work
+* more controlled execution flow
+* less wandering and less fragile “one loop does everything”
+
+## Job
+
+Implement a major but bounded orchestration upgrade for VenomGPT.
+
+Do not stop at analysis.
+
+Make the code changes.
+
+## Phase goal
+
+Move VenomGPT materially closer to a serious orchestration engine by replacing the current overly linear execution model with a more structured orchestration architecture.
+
+The target direction is:
+
+* planner / executor separation where appropriate
+* specialized tool or action routing where appropriate
+* structured run-state control instead of a mostly linear ad hoc loop
+* support for longer-running task execution without collapsing product clarity
+* stronger execution discipline, action selection, and recoverability
+
+This does NOT mean “become all of Replit.com.”
+It means: make the orchestration core itself substantially stronger.
+
+## Required outcomes
+
+1. Introduce a clearer orchestration structure than the current single-loop approach.
+
+2. Separate planning and execution responsibilities more cleanly where it materially improves behavior.
+
+3. Improve tool/action routing so the system makes more intentional choices about:
+
+   * inspection
+   * editing
+   * verification
+   * command execution
+   * visual-aware tasks
+   * fallback behavior
+
+4. Introduce a more structured run-state model or job-state model so task execution is easier to reason about than a mostly linear chain.
+
+5. Improve support for longer-running work so the system remains understandable, disciplined, and controllable.
+
+6. Reduce unnecessary wandering and improve execution discipline.
+
+7. Preserve existing working capabilities:
+
+   * text tasks
+   * file tasks
+   * command tasks
+   * screenshot/report tasks
+   * screenshot-to-targeting behavior
+   * task history
+   * operator-facing execution feed
+
+## What this phase should include
+
+Use your engineering judgment, but this phase should move meaningfully in the direction of the following architecture concepts where they are justified by the current codebase:
+
+* planner / executor split
+* specialized tool router or action router
+* long-running job handling
+* background-capable task flow where justified
+* structured run state machine or job graph
+* bounded parallel substeps where they are actually useful and safe
+* clearer step ownership
+* better recovery behavior when one substep fails
+
+You do NOT need to force every buzzword into the codebase.
+You DO need to produce a real orchestration leap.
+
+## Important instruction
+
+I am not asking for theoretical architecture notes.
+
+I am asking for real implementation.
+
+You should think like a strong systems engineer and product-minded architect:
+
+* choose what belongs now
+* keep it bounded
+* but make the pass substantial enough to matter
+
+## Implementation requirements
+
+1. Keep the implementation aligned with the current architecture.
+   Do not destroy working foundations.
+
+2. This must be a real orchestration upgrade, not a cosmetic refactor.
+
+3. Do not hide behind diagrams, TODOs, or “future architecture” notes.
+
+4. Do not turn this into a broad platform-services phase.
+   This is about orchestration core, not deploy/platform/integrations yet.
+
+5. Preserve the current evidence-oriented behavior.
+   The system must remain honest about what it has done and verified.
+
+6. Preserve safety boundaries around filesystem and command execution.
+
+7. If you introduce planner/executor structure, it must improve real behavior, not merely rename functions.
+
+8. If you introduce a tool router, it must materially improve action selection, not become dead abstraction.
+
+9. If you introduce long-running/background-capable flow, it must integrate cleanly with task state and UI behavior.
+
+10. If you introduce a run-state machine or job graph, it must make execution more structured, debuggable, and controllable.
+
+11. Avoid overengineering.
+    This phase should be ambitious, but still shippable and testable.
+
+## Strong preference
+
+I want a bold pass.
+
+Do not under-scope this just to stay comfortable.
+
+This phase should feel like a real architectural step upward, not a cautious patch.
+
+At the same time:
+do not let “bold” turn into chaos.
+
+## Guardrails
+
+Do NOT use this pass to:
+
+* redesign the whole product UI
+* build deploy/platform services
+* add MCP/integrations as the main focus
+* chase broad feature count growth
+* do a fake planner/executor split with no behavioral effect
+* write a long architecture essay without implementation
+
+This is an orchestration-core phase.
+
+## Verification requirements
+
+You must verify with real evidence, not claims.
+
+At minimum, verify all of the following locally:
+
+1. A normal text-only task still works.
+2. A file-edit task still works.
+3. A command/verification task still works.
+4. A screenshot-related task still works.
+5. The new orchestration structure is actually exercised in local runs.
+6. The execution behavior is materially more structured than before.
+7. Longer-running or more complex tasks are handled more cleanly than before.
+8. Logs / task feed / task state make the new orchestration understandable.
+
+You must show:
+
+* the new orchestration structure
+* what roles/states/routes now exist
+* what changed behaviorally
+* local run evidence
+* logs
+* exact commands run
+* what remains intentionally deferred
+
+## Final response format
+
+1. What I built
+2. Why the old orchestration was no longer enough
+3. The new orchestration architecture
+4. What roles / routers / states now exist
+5. How behavior is better in real tasks
+6. Files changed
+7. Verification performed
+8. What remains deferred before the product could be considered closer to true Replit-grade orchestration
+
+Important instruction
+
+Do not stop at analysis.
+Do not give me architecture notes instead of implementation.
+Make the code changes, implement the orchestration leap, and verify it with real evidence.
