@@ -34,6 +34,24 @@ interface CheckpointFileSummary {
   existed: boolean;
   snapshotAt: string;
   originalBytes: number;
+  diff?: string;
+  linesAdded?: number;
+  linesRemoved?: number;
+}
+
+interface ExecutionSummaryData {
+  stepsUsed: number;
+  stepsMax: number;
+  readsUsed: number;
+  readsMax: number;
+  writesUsed: number;
+  writesMax: number;
+  commandsUsed: number;
+  commandsMax: number;
+  verificationsDone: number;
+  finalPhase: string;
+  gateTriggers: Record<string, number> | null;
+  shellReadsBlocked: number;
 }
 
 interface CheckpointData {
@@ -184,6 +202,8 @@ export function OutputPanel() {
   const failureData: FailureData | null = (!doneLog && lastErrorLog?.data) ? lastErrorLog.data as FailureData : null;
   const checkpointLog     = agentLogs.findLast(l => l.type === 'checkpoint');
   const checkpointData: CheckpointData | null = checkpointLog?.data ? checkpointLog.data as unknown as CheckpointData : null;
+  const summaryLog        = agentLogs.findLast(l => l.type === 'execution_summary');
+  const executionSummaryData: ExecutionSummaryData | null = summaryLog?.data ? summaryLog.data as unknown as ExecutionSummaryData : null;
 
   const commandCount = agentLogs.filter(l => l.type === 'command').length;
   const repairCount  = agentLogs.filter(l => l.type === 'thought' && parseThought(l.message).stage === 'REPAIRING').length;
@@ -278,6 +298,10 @@ export function OutputPanel() {
               <CheckpointCard data={checkpointData} />
             )}
 
+            {executionSummaryData && (
+              <ExecutionSummaryCard data={executionSummaryData} />
+            )}
+
             {userScrolled && agentLogs.length > 0 && (
               <button
                 onClick={() => { setUserScrolled(false); agentEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }}
@@ -312,8 +336,9 @@ export function OutputPanel() {
 
 function AgentLogItem({ log }: { log: AgentLogEvent }) {
   // These event types are extracted and rendered outside the main log flow
-  if (log.type === 'done')       return null;
-  if (log.type === 'checkpoint') return null;  // rendered as CheckpointCard below CompletionCard
+  if (log.type === 'done')              return null;
+  if (log.type === 'checkpoint')        return null;  // rendered as CheckpointCard below CompletionCard
+  if (log.type === 'execution_summary') return null;  // rendered as ExecutionSummaryCard
 
   // Thought events get special stage-aware rendering
   if (log.type === 'thought') {
@@ -749,7 +774,7 @@ function CheckpointCard({ data }: { data: CheckpointData }) {
         <div className="ml-auto">{statusBadge}</div>
       </div>
 
-      {/* File list */}
+      {/* File list with diff view */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
           <FileCheck className="w-3.5 h-3.5" />
@@ -757,20 +782,7 @@ function CheckpointCard({ data }: { data: CheckpointData }) {
         </p>
         <ul className="space-y-0.5">
           {data.files.map((f, i) => (
-            <li key={i} className="flex items-center gap-2 text-xs font-mono px-1.5 py-0.5 rounded bg-panel-border/30">
-              <span className={f.existed ? 'text-blue-400/70' : 'text-emerald-400/70 font-bold'}>
-                {f.existed ? '~' : '+'}
-              </span>
-              <span className={`flex-1 truncate ${f.existed ? 'text-blue-200/80' : 'text-emerald-200/80'}`}>
-                {f.path}
-              </span>
-              {!f.existed && (
-                <span className="text-emerald-400/50 text-[10px] shrink-0">new file</span>
-              )}
-              {f.existed && (
-                <span className="text-blue-400/30 text-[10px] shrink-0">{(f.originalBytes / 1024).toFixed(1)}k original</span>
-              )}
-            </li>
+            <CheckpointFileRow key={i} file={f} />
           ))}
         </ul>
       </div>
@@ -838,6 +850,164 @@ function CheckpointCard({ data }: { data: CheckpointData }) {
         <p className="text-[10px] text-muted-foreground/40 pt-0.5">
           Snapshots are in-memory only — discard is available until server restart.
         </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Checkpoint file row (with diff expand) ────────────────────────────────────
+
+function CheckpointFileRow({ file: f }: { file: CheckpointFileSummary }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDiff = f.diff != null && f.diff.trim().length > 0;
+  const hasLineCounts = f.linesAdded !== undefined || f.linesRemoved !== undefined;
+
+  return (
+    <li className="rounded overflow-hidden bg-panel-border/20 border border-panel-border/30">
+      <button
+        onClick={() => hasDiff && setExpanded(e => !e)}
+        className={`w-full flex items-center gap-2 text-xs font-mono px-1.5 py-0.5 ${hasDiff ? 'hover:bg-panel-border/30 cursor-pointer' : 'cursor-default'} transition-colors`}
+      >
+        <span className={f.existed ? 'text-blue-400/70' : 'text-emerald-400/70 font-bold'}>
+          {f.existed ? '~' : '+'}
+        </span>
+        <span className={`flex-1 truncate text-left ${f.existed ? 'text-blue-200/80' : 'text-emerald-200/80'}`}>
+          {f.path}
+        </span>
+        {!f.existed && (
+          <span className="text-emerald-400/50 text-[10px] shrink-0">[new file]</span>
+        )}
+        {hasLineCounts && (
+          <span className="flex items-center gap-1 shrink-0">
+            {f.linesAdded !== undefined && (
+              <span className="text-[10px] text-green-400 bg-green-400/10 px-1 rounded">+{f.linesAdded}</span>
+            )}
+            {f.existed && f.linesRemoved !== undefined && (
+              <span className="text-[10px] text-red-400 bg-red-400/10 px-1 rounded">-{f.linesRemoved}</span>
+            )}
+          </span>
+        )}
+        {f.existed && !hasLineCounts && (
+          <span className="text-blue-400/30 text-[10px] shrink-0">{(f.originalBytes / 1024).toFixed(1)}k original</span>
+        )}
+        {hasDiff && (
+          expanded
+            ? <ChevronDown className="w-3 h-3 shrink-0 text-muted-foreground/40" />
+            : <ChevronRight className="w-3 h-3 shrink-0 text-muted-foreground/40" />
+        )}
+      </button>
+      {expanded && hasDiff && (
+        <div className="border-t border-panel-border/30 bg-[#080810] px-2 py-1.5 overflow-x-auto">
+          <pre className="text-[10px] leading-relaxed font-mono whitespace-pre">
+            {(f.diff ?? '').split('\n').map((line, i) => {
+              let color = 'text-muted-foreground/50';
+              if (line.startsWith('+') && !line.startsWith('+++')) color = 'text-green-400';
+              else if (line.startsWith('-') && !line.startsWith('---')) color = 'text-red-400';
+              else if (line.startsWith('@@')) color = 'text-cyan-400/60';
+              else if (line.startsWith('---') || line.startsWith('+++')) color = 'text-muted-foreground/40';
+              return (
+                <span key={i} className={`block ${color}`}>{line}</span>
+              );
+            })}
+          </pre>
+        </div>
+      )}
+    </li>
+  );
+}
+
+// ─── Execution summary card ────────────────────────────────────────────────────
+
+function ExecutionSummaryCard({ data }: { data: ExecutionSummaryData }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasGates = data.gateTriggers && Object.keys(data.gateTriggers).length > 0;
+
+  const stepPct = data.stepsMax > 0 ? Math.round((data.stepsUsed / data.stepsMax) * 100) : 0;
+  const barColor = stepPct >= 90 ? 'bg-red-500' : stepPct >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
+
+  const gateReadable: Record<string, string> = {
+    shell_read_redundant:    'Shell read: redundant',
+    shell_read_cap_exceeded: 'Shell read: cap exceeded',
+    redundant_read:          'Read: redundant',
+    read_cap_exceeded:       'Read: cap exceeded',
+    write_cap_exceeded:      'Write: cap exceeded',
+    write_class_blocked:     'Write: class blocked',
+    command_cap_exceeded:    'Command: cap exceeded',
+    post_verify_read_blocked:'Post-verify read blocked',
+    verification_required:   'Verification required',
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-500/20 bg-slate-500/5 p-3 mt-1.5 space-y-2">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center gap-2 text-left"
+      >
+        <Activity className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+        <span className="font-semibold text-xs text-slate-300">Execution Summary</span>
+        <span className="text-xs text-muted-foreground ml-1">
+          {data.stepsUsed}/{data.stepsMax} steps · {data.verificationsDone} verify{data.verificationsDone !== 1 ? 's' : ''}
+          {hasGates && ` · ${Object.values(data.gateTriggers!).reduce((a, b) => a + b, 0)} gates`}
+        </span>
+        <div className="ml-auto shrink-0">
+          {expanded
+            ? <ChevronDown className="w-3 h-3 text-muted-foreground/40" />
+            : <ChevronRight className="w-3 h-3 text-muted-foreground/40" />
+          }
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="space-y-2 text-xs">
+          {/* Step budget bar */}
+          <div>
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+              <span>Steps</span>
+              <span>{data.stepsUsed} / {data.stepsMax} ({stepPct}%)</span>
+            </div>
+            <div className="h-1 rounded-full bg-panel-border overflow-hidden">
+              <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(stepPct, 100)}%` }} />
+            </div>
+          </div>
+
+          {/* Resource grid */}
+          <div className="grid grid-cols-3 gap-1.5 font-mono">
+            {[
+              { label: 'Reads',    used: data.readsUsed,    max: data.readsMax    },
+              { label: 'Writes',   used: data.writesUsed,   max: data.writesMax   },
+              { label: 'Commands', used: data.commandsUsed, max: data.commandsMax },
+            ].map(({ label, used, max }) => (
+              <div key={label} className="bg-panel-border/20 rounded px-2 py-1 text-center">
+                <div className="text-[10px] text-muted-foreground">{label}</div>
+                <div className="text-foreground font-semibold">{used}<span className="text-muted-foreground/50">/{max}</span></div>
+              </div>
+            ))}
+          </div>
+
+          {/* Phase */}
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <span>Final phase:</span>
+            <span className="font-mono text-slate-300">{data.finalPhase}</span>
+            {data.shellReadsBlocked > 0 && (
+              <span className="ml-auto text-amber-400/70">{data.shellReadsBlocked} shell read{data.shellReadsBlocked !== 1 ? 's' : ''} blocked</span>
+            )}
+          </div>
+
+          {/* Gate triggers */}
+          {hasGates && (
+            <div>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Gate triggers</p>
+              <div className="space-y-0.5">
+                {Object.entries(data.gateTriggers!).map(([reason, count]) => (
+                  <div key={reason} className="flex items-center justify-between font-mono bg-panel-border/20 rounded px-2 py-0.5">
+                    <span className="text-amber-400/70 text-[10px]">{gateReadable[reason] ?? reason}</span>
+                    <span className="text-amber-300 text-[10px]">×{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

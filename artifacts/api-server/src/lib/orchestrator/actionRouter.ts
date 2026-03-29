@@ -10,13 +10,16 @@
  *   1. Shell read bypass — blocks shell commands that effectively read file content
  *      when the file-read cap is already reached or the file is already read.
  *      Closes the loophole where `cat`, `sed -n`, `head`, `tail` bypass read_file caps.
- *   2. Read cap      — blocks read_file once profile.maxFileReads is reached
- *   3. Redundant read — blocks re-reading a file already in the read set
- *   4. Write cap     — blocks write_file once profile.maxFileWrites is reached
- *   5. Verification  — blocks done when unverified writes exist (if profile.requiresVerify)
+ *   2. Write class block — hard-blocks write_file on zero-write profiles (writesAllowed: false).
+ *   3. Read cap      — blocks read_file once profile.maxFileReads is reached
+ *   4. Redundant read — blocks re-reading a file already in the read set
+ *   5. Write cap     — blocks write_file once profile.maxFileWrites is reached
+ *   6. Command cap   — blocks run_command once profile.maxCommands is reached
+ *   7. Post-verify read blocked — blocks read_file after verifying phase for files not in plan
+ *   8. Verification  — blocks done when unverified writes exist (if profile.requiresVerify)
  */
 
-import type { RunState } from "./types.js";
+import type { RunState, GateRejectionReason } from "./types.js";
 
 // ─── Gate result ──────────────────────────────────────────────────────────────
 
@@ -24,13 +27,8 @@ export type GateResult =
   | { allowed: true }
   | { allowed: false; reason: GateRejectionReason; forcedMessage: string };
 
-export type GateRejectionReason =
-  | "shell_read_redundant"
-  | "shell_read_cap_exceeded"
-  | "redundant_read"
-  | "read_cap_exceeded"
-  | "write_cap_exceeded"
-  | "verification_required";
+// Re-export for convenience in agentLoop
+export type { GateRejectionReason };
 
 // ─── Shell file-read detection ────────────────────────────────────────────────
 
@@ -137,19 +135,65 @@ export function gateAction(
         }
       }
 
+      // Gate C: Command budget exceeded (non-read commands)
+      if (state.profile.maxCommands > 0 && state.commandsRun.length >= state.profile.maxCommands) {
+        return {
+          allowed: false,
+          reason:  "command_cap_exceeded",
+          forcedMessage:
+            `ORCHESTRATOR: Command blocked — command budget reached ` +
+            `(${state.profile.maxCommands} commands allowed for ${state.profile.category} tasks). ` +
+            `Commands run so far: ${state.commandsRun.length}. ` +
+            `No additional shell commands are authorized for this task profile. ` +
+            `Call done with the results you have, or report what is blocking you.`,
+        };
+      }
+
+      // Gate D: Profile allows zero commands at all (maxCommands === 0, not a read)
+      if (state.profile.maxCommands === 0 && readPath === null) {
+        return {
+          allowed: false,
+          reason:  "command_cap_exceeded",
+          forcedMessage:
+            `ORCHESTRATOR: Command blocked — this task profile (${state.profile.category}) does not allow shell commands. ` +
+            `Complete the task using read_file and write_file actions only, then call done.`,
+        };
+      }
+
       return { allowed: true };
     }
 
     case "read_file": {
-      const path = String(action["path"] ?? "");
+      const filePath = String(action["path"] ?? "");
+
+      // Gate: Anti-phase-wander — after entering verifying phase, block reads of
+      // files that were not already read during the execution phase.
+      // With a plan: only block files that weren't in filesToRead.
+      // Without a plan: block ALL new files not already read (prevent speculative drift).
+      if (state.phase === "verifying" && filePath && !state.filesRead.has(filePath)) {
+        const plannedReads = state.plan?.filesToRead;
+        const withinPlan   = plannedReads != null
+          ? plannedReads.includes(filePath)
+          : false;  // no plan → any unread file in verifying phase is out-of-scope
+        if (!withinPlan) {
+          return {
+            allowed: false,
+            reason:  "post_verify_read_blocked",
+            forcedMessage:
+              `ORCHESTRATOR: Read blocked — you are in the verification phase and "${filePath}" was not read during the execution phase. ` +
+              `Post-write reads of new files are an anti-pattern (phase wander). ` +
+              `To verify correctness, run a build or test command rather than reading source files.`,
+          };
+        }
+      }
 
       // Gate 1: Redundant read — same file already inspected this session.
-      if (path && state.filesRead.has(path)) {
+      if (filePath && state.filesRead.has(filePath)) {
         return {
           allowed: false,
           reason:  "redundant_read",
           forcedMessage:
-            `ORCHESTRATOR: You already read "${path}" this session. ` +
+            `ORCHESTRATOR: You already read "${filePath}" this session. ` +
             `Do not read the same file twice — you already know its contents. ` +
             `Proceed with the next action (write_file, run_command, or done).`,
         };
@@ -173,6 +217,18 @@ export function gateAction(
     }
 
     case "write_file": {
+      // Gate 0: Hard write-class block — profiles with writesAllowed: false cannot write at all.
+      if (!state.profile.writesAllowed) {
+        return {
+          allowed: false,
+          reason:  "write_class_blocked",
+          forcedMessage:
+            `ORCHESTRATOR: File write hard-blocked — the "${state.profile.category}" task profile does not permit any file writes. ` +
+            `This is a class-level restriction, not a cap. No writes are authorized regardless of how many files have been written. ` +
+            `Complete the task by reading and responding, then call done. Do not attempt to write files.`,
+        };
+      }
+
       // Gate 3: Write cap reached.
       if (state.filesWritten.size >= state.profile.maxFileWrites) {
         const writeList = [...state.filesWritten].join(", ");
@@ -280,10 +336,15 @@ export function updateStateAfterAction(
           if (normalizedPath) state.filesRead.add(normalizedPath);
         }
 
-        // A successful command clears unverified writes (it IS the verification step)
+        // A successful command clears unverified writes (it IS the verification step).
+        // Only enter the "verifying" phase when this command is verifying actual writes.
+        // A command run before any write (e.g., gathering info) should NOT transition phase.
+        const hadPendingWrites = state.unverifiedWrites.size > 0;
         state.unverifiedWrites.clear();
         state.verificationsDone++;
-        state.phase = "verifying";
+        if (hadPendingWrites) {
+          state.phase = "verifying";
+        }
       }
       break;
     }
@@ -303,4 +364,12 @@ export function updateStateAfterAction(
  */
 export function recordShellReadBlocked(state: RunState): void {
   state.shellReadsBlocked++;
+}
+
+/**
+ * Increment the gate trigger count for a specific rejection reason.
+ * Used to build the execution summary event at task completion.
+ */
+export function recordGateTrigger(state: RunState, reason: GateRejectionReason): void {
+  state.gateCounts[reason] = (state.gateCounts[reason] ?? 0) + 1;
 }

@@ -21,7 +21,12 @@ export type AgentEventType =
    * The operator can call POST /api/agent/tasks/:id/discard to revert all changes,
    * or POST /api/agent/tasks/:id/apply to mark them as permanently accepted.
    */
-  | "checkpoint";
+  | "checkpoint"
+  /**
+   * Emitted at every task exit path (done, error, cancel, maxSteps).
+   * Contains a structured payload with step usage, gate telemetry, and phase.
+   */
+  | "execution_summary";
 
 export interface AgentEvent {
   type: AgentEventType;

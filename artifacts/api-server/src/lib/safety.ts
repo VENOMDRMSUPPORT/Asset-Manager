@@ -142,6 +142,12 @@ export class SafetyError extends Error {
   }
 }
 
+/**
+ * Safe sudo allowlist — these sudo prefixes are explicitly permitted.
+ * Everything else is blocked.
+ */
+const SUDO_ALLOWLIST = ["sudo npm", "sudo npx", "sudo pip", "sudo python", "sudo node", "sudo yarn", "sudo pnpm"];
+
 const BLOCKED_COMMANDS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /rm\s+-rf\s+\/(?!\w)/, reason: "recursive deletion from filesystem root" },
   { pattern: /rm\s+-rf\s+~/, reason: "recursive deletion of home directory" },
@@ -162,13 +168,32 @@ const BLOCKED_COMMANDS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /curl\s+.*\|\s*(ba)?sh/, reason: "piped remote script execution" },
   { pattern: /wget\s+.*\|\s*(ba)?sh/, reason: "piped remote script execution" },
   { pattern: /curl\s+.*\|\s*sudo/, reason: "piped remote script with sudo" },
+  // curl/wget writing to disk via output flags
+  { pattern: /\b(?:curl|wget)\b.*\s(?:-o\s|-O\s|--output[= ])/, reason: "downloading file to disk via curl/wget" },
+  // chmod 777 or chmod a+rwx / a+x on any path
+  { pattern: /\bchmod\s+777\b/, reason: "world-writable permissions (chmod 777)" },
+  { pattern: /\bchmod\s+a\+(?:rwx|wx|x)\b/, reason: "world-executable permissions (chmod a+...x)" },
 ];
 
 export function validateCommand(cmd: string): void {
+  // Check standard blocked patterns first
   for (const { pattern, reason } of BLOCKED_COMMANDS) {
     if (pattern.test(cmd)) {
       throw new SafetyError(
         `Command blocked: ${reason}. The command "${cmd.slice(0, 80)}" matches a safety rule and will not run.`
+      );
+    }
+  }
+
+  // Check for arbitrary sudo — block anything that starts with `sudo` but is NOT
+  // in the explicit allowlist.
+  if (/\bsudo\b/.test(cmd)) {
+    const trimmed = cmd.trim();
+    const isAllowed = SUDO_ALLOWLIST.some(allowed => trimmed.startsWith(allowed));
+    if (!isAllowed) {
+      throw new SafetyError(
+        `Command blocked: arbitrary sudo execution. The command "${cmd.slice(0, 80)}" uses sudo with a non-allowlisted program. ` +
+          `Permitted sudo prefixes: ${SUDO_ALLOWLIST.join(", ")}.`
       );
     }
   }

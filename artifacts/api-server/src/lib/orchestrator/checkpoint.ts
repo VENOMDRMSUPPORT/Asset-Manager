@@ -13,9 +13,10 @@
  *   1. The agent loop calls snapshotFileForTask() before every write_file action.
  *   2. The snapshot is idempotent — only the FIRST write to a file is snapshotted,
  *      preserving the true "before" state even if the agent rewrites the same file.
- *   3. At task completion, a "checkpoint" event is emitted with the file list.
- *   4. The checkpoint API routes expose discard/apply endpoints.
- *   5. The frontend renders a CheckpointCard with real Discard/Accept buttons.
+ *   3. After a successful write, patchSnapshotWithDiff() computes per-file diffs.
+ *   4. At task completion, a "checkpoint" event is emitted with the file list.
+ *   5. The checkpoint API routes expose discard/apply endpoints.
+ *   6. The frontend renders a CheckpointCard with real Discard/Accept buttons.
  *
  * SCOPE:
  *   Only tasks that perform at least one successful write_file get a checkpoint.
@@ -35,6 +36,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { logger } from "../logger.js";
+import { computeDiff } from "./diffEngine.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +51,12 @@ export interface FileSnapshot {
   existed: boolean;
   /** ISO timestamp of when the snapshot was taken. */
   snapshotAt: string;
+  /** Unified diff string (populated after the first successful write to this file). */
+  diff?: string;
+  /** Lines added in this file vs. the original. */
+  linesAdded?: number;
+  /** Lines removed from this file vs. the original. */
+  linesRemoved?: number;
 }
 
 export interface TaskCheckpoint {
@@ -71,6 +79,12 @@ export interface CheckpointFileSummary {
   snapshotAt: string;
   /** Size of original content in bytes (0 for new files). */
   originalBytes: number;
+  /** Unified diff string (populated after write). */
+  diff?: string;
+  /** Lines added vs. original. */
+  linesAdded?: number;
+  /** Lines removed vs. original. */
+  linesRemoved?: number;
 }
 
 export interface CheckpointSummary {
@@ -146,6 +160,40 @@ export async function snapshotFileForTask(
 }
 
 /**
+ * Compute and store a diff on the existing snapshot for a file, after the
+ * agent has successfully written the file. Safe to call multiple times —
+ * each call overwrites the previous diff (so the latest write state is shown).
+ *
+ * @param taskId        - Task identifier.
+ * @param filePath      - Relative file path (must match snapshot key).
+ * @param modifiedContent - The content that was just written to the file.
+ */
+export function patchSnapshotWithDiff(
+  taskId: string,
+  filePath: string,
+  modifiedContent: string,
+): void {
+  const cp = checkpoints.get(taskId);
+  if (!cp) return;
+
+  const snap = cp.snapshots.get(filePath);
+  if (!snap) return;
+
+  try {
+    const result = computeDiff(snap.originalContent, modifiedContent, filePath);
+    snap.diff         = result.unified;
+    snap.linesAdded   = result.linesAdded;
+    snap.linesRemoved = result.linesRemoved;
+    logger.debug(
+      { taskId, filePath, linesAdded: result.linesAdded, linesRemoved: result.linesRemoved },
+      "[Checkpoint] Diff patched onto snapshot",
+    );
+  } catch (err) {
+    logger.warn({ taskId, filePath, err }, "[Checkpoint] Diff computation failed — snapshot kept without diff");
+  }
+}
+
+/**
  * Return the TaskCheckpoint for a task, or undefined if no files were written.
  */
 export function getCheckpoint(taskId: string): TaskCheckpoint | undefined {
@@ -159,20 +207,23 @@ export function serializeCheckpoint(cp: TaskCheckpoint): CheckpointSummary {
   const files: CheckpointFileSummary[] = [];
   for (const snap of cp.snapshots.values()) {
     files.push({
-      path: snap.path,
-      existed: snap.existed,
-      snapshotAt: snap.snapshotAt,
+      path:          snap.path,
+      existed:       snap.existed,
+      snapshotAt:    snap.snapshotAt,
       originalBytes: snap.originalContent.length,
+      diff:          snap.diff,
+      linesAdded:    snap.linesAdded,
+      linesRemoved:  snap.linesRemoved,
     });
   }
   return {
-    taskId: cp.taskId,
-    createdAt: cp.createdAt,
-    status: cp.status,
-    appliedAt: cp.appliedAt,
-    discardedAt: cp.discardedAt,
+    taskId:       cp.taskId,
+    createdAt:    cp.createdAt,
+    status:       cp.status,
+    appliedAt:    cp.appliedAt,
+    discardedAt:  cp.discardedAt,
     files,
-    fileCount: files.length,
+    fileCount:    files.length,
   };
 }
 

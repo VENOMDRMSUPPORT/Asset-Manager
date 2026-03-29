@@ -32,6 +32,10 @@ export interface ExecutionProfile {
   maxFileReads:   number;
   /** Max distinct file writes allowed in this profile. */
   maxFileWrites:  number;
+  /** If true, write_file is hard-blocked at the gate level (for zero-write profiles). */
+  writesAllowed:  boolean;
+  /** Max run_command actions allowed in this profile. 0 = no commands allowed. */
+  maxCommands:    number;
   /** If true, the action router blocks `done` when there are unverified writes. */
   requiresVerify: boolean;
   /** If true, a structured planning model call fires before the main execution loop. */
@@ -70,6 +74,19 @@ export type RunPhase =
   | "complete"
   | "failed";
 
+// ─── Gate rejection reason (must match actionRouter.ts) ───────────────────────
+
+export type GateRejectionReason =
+  | "shell_read_redundant"
+  | "shell_read_cap_exceeded"
+  | "redundant_read"
+  | "read_cap_exceeded"
+  | "write_cap_exceeded"
+  | "write_class_blocked"
+  | "command_cap_exceeded"
+  | "post_verify_read_blocked"
+  | "verification_required";
+
 // ─── Run state ────────────────────────────────────────────────────────────────
 
 /**
@@ -103,6 +120,8 @@ export interface RunState {
    * bypass attempts (cat, sed -n, head, tail). Visible in logs for debugging.
    */
   shellReadsBlocked:        number;
+  /** Gate trigger counts by rejection reason — used for execution summary telemetry. */
+  gateCounts:               Partial<Record<GateRejectionReason, number>>;
 }
 
 export function createRunState(profile: ExecutionProfile, operatorMaxSteps: number): RunState {
@@ -122,5 +141,6 @@ export function createRunState(profile: ExecutionProfile, operatorMaxSteps: numb
     unverifiedWrites:         new Set(),
     verificationsDone:        0,
     shellReadsBlocked:        0,
+    gateCounts:               {},
   };
 }

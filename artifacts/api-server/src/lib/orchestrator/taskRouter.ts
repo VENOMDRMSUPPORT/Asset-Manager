@@ -20,24 +20,24 @@ import type { TaskCategory, ExecutionProfile } from "./types.js";
 // ─── Profile registry ─────────────────────────────────────────────────────────
 
 const PROFILE_CONFIGS: Record<TaskCategory, Omit<ExecutionProfile, "category">> = {
-  //                         maxSteps  reads  writes  verify  plan
-  conversational:  { maxSteps:  2, maxFileReads: 0, maxFileWrites: 0, requiresVerify: false, planningPhase: false,
+  //                         maxSteps  reads  writes  writesAllowed  maxCmds  verify  plan
+  conversational:  { maxSteps:  2, maxFileReads: 0, maxFileWrites: 0, writesAllowed: false, maxCommands:  0, requiresVerify: false, planningPhase: false,
     description: "Conversational — direct response, no file access" },
-  visual_describe: { maxSteps:  3, maxFileReads: 0, maxFileWrites: 0, requiresVerify: false, planningPhase: false,
+  visual_describe: { maxSteps:  3, maxFileReads: 0, maxFileWrites: 0, writesAllowed: false, maxCommands:  0, requiresVerify: false, planningPhase: false,
     description: "Describe screenshot — answer only, no file access" },
-  visual_report:   { maxSteps:  6, maxFileReads: 0, maxFileWrites: 1, requiresVerify: true,  planningPhase: false,
+  visual_report:   { maxSteps:  6, maxFileReads: 0, maxFileWrites: 1, writesAllowed: true,  maxCommands:  2, requiresVerify: true,  planningPhase: false,
     description: "Visual report — write findings file then verify" },
-  visual_fix:      { maxSteps: 12, maxFileReads: 2, maxFileWrites: 3, requiresVerify: true,  planningPhase: false,
+  visual_fix:      { maxSteps: 12, maxFileReads: 2, maxFileWrites: 3, writesAllowed: true,  maxCommands:  4, requiresVerify: true,  planningPhase: false,
     description: "Visual fix — inspect ≤2 files, write fix, verify" },
-  visual_improve:  { maxSteps: 14, maxFileReads: 2, maxFileWrites: 4, requiresVerify: true,  planningPhase: false,
+  visual_improve:  { maxSteps: 14, maxFileReads: 2, maxFileWrites: 4, writesAllowed: true,  maxCommands:  5, requiresVerify: true,  planningPhase: false,
     description: "Visual improve — inspect ≤2 files, implement improvements, verify" },
-  visual_analyze:  { maxSteps:  5, maxFileReads: 1, maxFileWrites: 0, requiresVerify: false, planningPhase: false,
+  visual_analyze:  { maxSteps:  5, maxFileReads: 1, maxFileWrites: 0, writesAllowed: false, maxCommands:  1, requiresVerify: false, planningPhase: false,
     description: "Visual analyze — structured assessment, optional 1-file read" },
-  code_edit:       { maxSteps: 25, maxFileReads: 10, maxFileWrites: 8, requiresVerify: true,  planningPhase: true,
+  code_edit:       { maxSteps: 25, maxFileReads: 10, maxFileWrites: 8, writesAllowed: true,  maxCommands: 12, requiresVerify: true,  planningPhase: true,
     description: "Code editing — full loop with planning phase and verification" },
-  code_verify:     { maxSteps:  8, maxFileReads:  5, maxFileWrites: 0, requiresVerify: false, planningPhase: false,
+  code_verify:     { maxSteps:  8, maxFileReads:  5, maxFileWrites: 0, writesAllowed: false, maxCommands:  5, requiresVerify: false, planningPhase: false,
     description: "Verification/inspection — read and run commands, no writes" },
-  text_explain:    { maxSteps:  6, maxFileReads:  4, maxFileWrites: 0, requiresVerify: false, planningPhase: false,
+  text_explain:    { maxSteps:  6, maxFileReads:  4, maxFileWrites: 0, writesAllowed: false, maxCommands:  0, requiresVerify: false, planningPhase: false,
     description: "Explanation — read relevant context, answer, done" },
 };
 
